@@ -1,17 +1,26 @@
-import { Client } from "@opensearch-project/opensearch";
+import {
+  CloudFormationCustomResourceEvent,
+  CloudFormationCustomResourceResponse,
+} from "aws-lambda";
 
-const client = new Client({ node: process.env.OPENSEARCH_DOMAIN });
-export const handler = async () => {
-  console.log(process.env.OPENSEARCH_DOMAIN);
-  await client.indices.create({
-    index: "your-index-name",
-    body: {
-      mappings: {
-        properties: {
-          field1: { type: "text" },
-          field2: { type: "keyword" },
-        },
-      },
-    },
-  });
+export const handler = async (
+  event: CloudFormationCustomResourceEvent
+): Promise<CloudFormationCustomResourceResponse> => {
+  console.log("#####", event);
+  switch (event.RequestType) {
+    case "Create":
+      console.log("Creating some resource");
+    case "Update":
+      console.log("Updating some resource");
+    case "Delete":
+      console.log("Updating some resource");
+  }
+
+  return {
+    Status: "SUCCESS",
+    RequestId: event.RequestId,
+    LogicalResourceId: event.LogicalResourceId,
+    StackId: event.StackId,
+    PhysicalResourceId: "MyResourceId",
+  };
 };

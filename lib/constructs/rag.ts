@@ -8,28 +8,29 @@ import { Construct } from "constructs";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { LambdaFunction } from "./lambda-function";
 import path = require("path");
+import * as logs from "aws-cdk-lib/aws-logs";
 
 export class Rag extends Construct {
   public constructor(scope: Construct, id: string) {
     super(scope, id);
 
     const sourceDataBucket = this.createDataSourceBucket();
-    // const name = "demo-example";
-    // const role = this.createServiceRole(sourceDataBucket);
+    const name = "demo-example";
+    const role = this.createServiceRole(sourceDataBucket);
 
     // const collection = this.createOpenSearchCollection(name);
-    // const createIndexFunction = this.createOpenSearchIndex(collection);
-    // const policies = [
-    //   this.createNetworkPolicy(name),
-    //   this.createDataAccessPolicy(name, [
-    //     role,
-    //     createIndexFunction.function.role!,
-    //   ]),
-    //   this.createEncryptionPolicy(name),
-    // ];
-    // for (const policy of policies) {
-    //   collection.addDependency(policy);
-    // }
+    const createIndexFunction = this.createOpenSearchIndex();
+    const policies = [
+      this.createNetworkPolicy(name),
+      this.createDataAccessPolicy(name, [
+        role,
+        // createIndexFunction.function.role!,
+      ]),
+      this.createEncryptionPolicy(name),
+    ];
+    for (const policy of policies) {
+      // collection.addDependency(policy);
+    }
 
     // role.addToPolicy(
     //   new iam.PolicyStatement({
@@ -174,17 +175,37 @@ export class Rag extends Construct {
     });
   }
 
-  private createOpenSearchIndex(collection: osServerless.CfnCollection) {
-    const createIndexFunction = new LambdaFunction(this, "create-index", {
-      functionProps: {
-        entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
-        environment: {
-          OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
+  private createOpenSearchIndex() {
+    const { function: createIndexFunction } = new LambdaFunction(
+      this,
+      "create-index",
+      {
+        functionProps: {
+          entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
+          environment: {
+            // OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
+          },
         },
+      }
+    );
+
+    const customResourceProvider = new cr.Provider(
+      this,
+      "create-index-provider",
+      {
+        onEventHandler: createIndexFunction,
+        logRetention: logs.RetentionDays.ONE_DAY,
+      }
+    );
+
+    new cdk.CustomResource(this, "create-index-custom-resource", {
+      serviceToken: customResourceProvider.serviceToken,
+      properties: {
+        UpdateTime: new Date().toISOString(),
       },
     });
 
-    createIndexFunction.function.role?.addManagedPolicy(
+    createIndexFunction.role?.addManagedPolicy(
       new iam.ManagedPolicy(this, "aoss-policy", {
         statements: [
           new iam.PolicyStatement({
@@ -197,7 +218,7 @@ export class Rag extends Construct {
     );
 
     new cdk.CfnOutput(this, "create-index-function-arn", {
-      value: createIndexFunction.function.functionArn,
+      value: createIndexFunction.functionArn,
     });
 
     return createIndexFunction;
