@@ -76,6 +76,8 @@ export class Rag extends Construct {
                 "aoss:ReadDocument",
                 "aoss:WriteDocument",
                 "aoss:CreateIndex",
+                // TMP
+                "aoss:DeleteIndex",
               ],
               ResourceType: "index",
             },

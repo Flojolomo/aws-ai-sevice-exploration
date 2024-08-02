@@ -32,9 +32,19 @@ export const handler = async (
   // ): Promise<CloudFormationCustomResourceResponse> => {
 ): Promise<any> => {
   console.log("#####", event);
-  console.log(
-    await await openSearchClient.indices.exists({ index: "my-index" })
-  );
+  if (
+    await (
+      await openSearchClient.indices.exists({ index: "my-index" })
+    ).body
+  ) {
+    console.log("Index already exists");
+    await openSearchClient.indices.delete({ index: "my-index" });
+    console.log("Index deleted");
+    return;
+  }
+
+  await openSearchClient.indices.create({ index: "my-index" });
+  console.log("Index created");
   // switch (event.RequestType) {
   //   case "Create":
   //     console.log("Creating some resource");
