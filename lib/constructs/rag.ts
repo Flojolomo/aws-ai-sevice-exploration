@@ -16,10 +16,11 @@ export class Rag extends Construct {
 
     const sourceDataBucket = this.createDataSourceBucket();
     const name = "demo-example";
-    const role = this.createServiceRole(sourceDataBucket);
+    const modelId = "cohere.embed-english-v3";
+    const role = this.createServiceRole(sourceDataBucket, modelId);
 
     const collection = this.createOpenSearchCollection(name);
-    const createIndexFunction = this.createOpenSearchIndex(collection);
+    const createIndexFunction = this.createOpenSearchIndex(collection, modelId);
     const policies = [
       this.createNetworkPolicy(name),
       this.createDataAccessPolicy(name, [role, createIndexFunction.role!]),
@@ -37,7 +38,12 @@ export class Rag extends Construct {
       })
     );
 
-    // this.createKnowledgeBase({ collection, role });
+    this.createKnowledgeBase({
+      bucket: sourceDataBucket,
+      modelId,
+      collection,
+      role,
+    });
   }
 
   private createOpenSearchCollection(name: string) {
@@ -49,6 +55,11 @@ export class Rag extends Construct {
     });
 
     collection.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+
+    new cdk.CfnOutput(this, "collection-arn", {
+      value: collection.attrArn,
+    });
+
     return collection;
   }
 
@@ -84,6 +95,7 @@ export class Rag extends Construct {
           ],
           Principal: [
             ...roles.map((role) => role.roleArn),
+            "arn:aws:sts::014498645519:assumed-role/AWSReservedSSO_AWSAdministratorAccess_2e415d69fac08946/florian1siegel@googlemail.com",
             new iam.AccountPrincipal(cdk.Stack.of(this).account).arn,
           ],
           Description: "",
@@ -121,22 +133,26 @@ export class Rag extends Construct {
   }
 
   private createKnowledgeBase({
+    bucket,
     collection,
+    modelId,
     role,
   }: {
+    bucket: s3.Bucket;
     collection: osServerless.CfnCollection;
+    modelId: string;
     role: iam.Role;
   }) {
-    return new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
+    const knowledgeBase = new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
       name: "demo-example",
       roleArn: role.roleArn,
       storageConfiguration: {
         opensearchServerlessConfiguration: {
           collectionArn: collection.attrArn,
-          vectorIndexName: "bedrock-knowledge-base-default-index",
+          vectorIndexName: "my-index",
           fieldMapping: {
-            metadataField: "AMAZON_BEDROCK_METADATA",
             vectorField: "bedrock-knowledge-base-default-vector",
+            metadataField: "AMAZON_BEDROCK_METADATA",
             textField: "AMAZON_BEDROCK_TEXT_CHUNK",
           },
         },
@@ -145,11 +161,31 @@ export class Rag extends Construct {
       knowledgeBaseConfiguration: {
         type: "VECTOR",
         vectorKnowledgeBaseConfiguration: {
-          embeddingModelArn:
-            "arn:aws:bedrock:eu-central-1::foundation-model/cohere.embed-english-v3",
+          embeddingModelArn: `arn:aws:bedrock:eu-central-1::foundation-model/${modelId}`,
         },
       },
     });
+
+    const dataSource = new bedrock.CfnDataSource(this, "data-source", {
+      name: "demo-example",
+      knowledgeBaseId: knowledgeBase.ref,
+      dataSourceConfiguration: {
+        type: "S3",
+        s3Configuration: {
+          bucketArn: bucket.bucketArn,
+        },
+      },
+    });
+
+    new cdk.CfnOutput(this, "knowledge-base-id", {
+      value: knowledgeBase.getAtt("KnowledgeBaseId").toString(),
+    });
+
+    new cdk.CfnOutput(this, "data-source-id", {
+      value: dataSource.getAtt("DataSourceId").toString(),
+    });
+
+    return knowledgeBase;
   }
 
   private createNetworkPolicy(name: string) {
@@ -174,7 +210,10 @@ export class Rag extends Construct {
     });
   }
 
-  private createOpenSearchIndex(collection: osServerless.CfnCollection) {
+  private createOpenSearchIndex(
+    collection: osServerless.CfnCollection,
+    modelId: string
+  ) {
     const { function: createIndexFunction } = new LambdaFunction(
       this,
       "create-index",
@@ -183,6 +222,7 @@ export class Rag extends Construct {
           entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
           environment: {
             OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
+            MODEL_ID: modelId,
           },
         },
       }
@@ -223,7 +263,10 @@ export class Rag extends Construct {
     return createIndexFunction;
   }
 
-  private createServiceRole(dataSourceBucket: s3.Bucket) {
+  private createServiceRole(
+    dataSourceBucket: s3.Bucket,
+    embeddingModelId: string
+  ) {
     const role = new iam.Role(this, "knowledge-base-role", {
       assumedBy: new iam.ServicePrincipal("bedrock.amazonaws.com"),
     });
@@ -241,9 +284,17 @@ export class Rag extends Construct {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["bedrock:InvokeModel"],
-        resources: ["*"],
+        resources: [
+          "*",
+          // TODO limit to the model used in the knowledge base
+          `arn:aws:bedrock:eu-central-1::foundation-model/${embeddingModelId}`,
+        ],
       })
     );
+
+    new cdk.CfnOutput(this, "knowledge-base-role-arn", {
+      value: role.roleArn,
+    });
 
     return role;
   }

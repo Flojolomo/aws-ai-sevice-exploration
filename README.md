@@ -43,3 +43,46 @@ to initiate the processing chain, you can upload an audio file to `<bucket name>
 Happy
 
 ![architecture](./docs/architecture-diagram.drawio.svg)
+
+##
+
+Ideas:
+
+- Stream open search logs to cloudwatch https://docs.aws.amazon.com/opensearch-service/latest/developerguide/createdomain-configure-slow-logs.html
+- Multiple data sources for one knowledge base
+- Multiple indices for open search / multiple knowledge bases
+
+## Notes
+
+`aws bedrock-agent start-ingestion-job --knowledge-base-id 22EPIWCVCS --data-source-id 5BE35OW5YK`
+
+PUT bedrock-knowledge-base
+
+```json
+{
+  "aliases": {},
+  "mappings": {
+    "properties": {
+      "AMAZON_BEDROCK_METADATA": {
+        "type": "text",
+        "index": false
+      },
+      "AMAZON_BEDROCK_TEXT_CHUNK": {
+        "type": "text"
+      },
+      "bedrock-knowledge-base-default-vector": {
+        "type": "knn_vector",
+        "dimension": 1536,
+        "method": {
+          "engine": "faiss",
+          "space_type": "l2",
+          "name": "hnsw",
+          "parameters": {}
+        }
+      }
+    }
+  }
+}
+```
+
+https://opensearch.org/docs/latest/clients/javascript/index/#connecting-to-opensearch
