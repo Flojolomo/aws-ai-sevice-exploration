@@ -51,6 +51,7 @@ Ideas:
 - Stream open search logs to cloudwatch https://docs.aws.amazon.com/opensearch-service/latest/developerguide/createdomain-configure-slow-logs.html
 - Multiple data sources for one knowledge base
 - Multiple indices for open search / multiple knowledge bases
+- Trigger first sync if S3 is injected
 
 ## Notes
 
@@ -86,3 +87,13 @@ PUT bedrock-knowledge-base
 ```
 
 https://opensearch.org/docs/latest/clients/javascript/index/#connecting-to-opensearch
+
+![alt text](image.png)
+
+AiDemoCasesStack.ragdatasourceid36BF55BF = OPWJUJCIYV
+AiDemoCasesStack.ragknowledgebaseid71AD2CD0 = MFLEQHIMEL
+
+> btoa(JSON.stringify({ query: "Hello "}))
+> 'eyJxdWVyeSI6IkhlbGxvICJ9'
+> btoa(JSON.stringify({ query: "Give me 3 receipes"}))
+> 'eyJxdWVyeSI6IkdpdmUgbWUgMyByZWNlaXBlcyJ9'

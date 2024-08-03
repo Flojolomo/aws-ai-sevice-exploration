@@ -38,12 +38,14 @@ export class Rag extends Construct {
       })
     );
 
-    this.createKnowledgeBase({
+    const knowledgeBase = this.createKnowledgeBase({
       bucket: sourceDataBucket,
       modelId,
       collection,
       role,
     });
+
+    this.createTestLambda(knowledgeBase, "anthropic.claude-v2");
   }
 
   private createOpenSearchCollection(name: string) {
@@ -169,6 +171,8 @@ export class Rag extends Construct {
     const dataSource = new bedrock.CfnDataSource(this, "data-source", {
       name: "demo-example",
       knowledgeBaseId: knowledgeBase.ref,
+      // Otherwise the deletion fails due to permissions issues
+      dataDeletionPolicy: "RETAIN",
       dataSourceConfiguration: {
         type: "S3",
         s3Configuration: {
@@ -228,21 +232,23 @@ export class Rag extends Construct {
       }
     );
 
-    // const customResourceProvider = new cr.Provider(
-    //   this,
-    //   "create-index-provider",
-    //   {
-    //     onEventHandler: createIndexFunction,
-    //     logRetention: logs.RetentionDays.ONE_DAY,
-    //   }
-    // );
+    const customResourceProvider = new cr.Provider(
+      this,
+      "create-index-provider",
+      {
+        onEventHandler: createIndexFunction,
+        logRetention: logs.RetentionDays.ONE_DAY,
+      }
+    );
 
-    // new cdk.CustomResource(this, "create-index-custom-resource", {
-    //   serviceToken: customResourceProvider.serviceToken,
-    //   properties: {
-    //     UpdateTime: new Date().toISOString(),
-    //   },
-    // });
+    /** Updates only, if parameters change!! */
+    new cdk.CustomResource(this, "create-index-custom-resource", {
+      serviceToken: customResourceProvider.serviceToken,
+      properties: {
+        // UpdateTime: new Date().toISOString(),
+        MODEL_ID: modelId,
+      },
+    });
 
     createIndexFunction.role?.addManagedPolicy(
       new iam.ManagedPolicy(this, "aoss-policy", {
@@ -297,5 +303,34 @@ export class Rag extends Construct {
     });
 
     return role;
+  }
+
+  private createTestLambda(
+    knowledgeBase: bedrock.CfnKnowledgeBase,
+    modelId: string
+  ) {
+    const { function: testFunction } = new LambdaFunction(
+      this,
+      "test-knowledgebase-function",
+      {
+        functionProps: {
+          entry: path.join(
+            __dirname,
+            "..",
+            "lambda/query-knowledge-base/handler.ts"
+          ),
+          environment: {
+            MODEl_ID: modelId,
+            KNOWLEDGEBASE_ID: knowledgeBase
+              .getAtt("KnowledgeBaseId")
+              .toString(),
+          },
+        },
+      }
+    );
+
+    new cdk.CfnOutput(this, "test-knowledgebase-function-name", {
+      value: testFunction.functionName,
+    });
   }
 }

@@ -17,7 +17,10 @@ const bedrockEmbeddingModels: Record<string, EmbeddingModelInfo> = {
   "cohere.embed-multilingual-v3": { dimension: 1024, provider: "Cohere" },
 };
 
-import { CloudFormationCustomResourceEvent } from "aws-lambda";
+import {
+  CloudFormationCustomResourceEvent,
+  CloudFormationCustomResourceResponse,
+} from "aws-lambda";
 import * as env from "env-var";
 
 const MODEL_ID = env.get("MODEL_ID").required().asString();
@@ -46,8 +49,7 @@ const openSearchClient = new Client({
 
 export const handler = async (
   event: CloudFormationCustomResourceEvent
-  // ): Promise<CloudFormationCustomResourceResponse> => {
-): Promise<any> => {
+): Promise<CloudFormationCustomResourceResponse> => {
   console.log("#####", event);
   if (
     await (
@@ -55,12 +57,19 @@ export const handler = async (
     ).body
   ) {
     console.log("Index already exists");
-    await openSearchClient.indices.delete({ index: "my-index" });
+    return {
+      Status: "SUCCESS",
+      RequestId: event.RequestId,
+      LogicalResourceId: event.LogicalResourceId,
+      StackId: event.StackId,
+      PhysicalResourceId: "MyResourceId",
+    };
   }
 
-  const { dimension } = bedrockEmbeddingModels[MODEL_ID];
+  const { dimension } =
+    bedrockEmbeddingModels[event.ResourceProperties.MODEL_ID];
   console.log("Creating index with vecotr length: ", dimension);
-  return await openSearchClient.indices.create({
+  await openSearchClient.indices.create({
     index: "my-index",
     body: {
       settings: {
@@ -110,10 +119,11 @@ export const handler = async (
   //     console.log("Updating some resource");
   // }
 
-  //   Status: "SUCCESS",
-  //   RequestId: event.RequestId,
-  //   LogicalResourceId: event.LogicalResourceId,
-  //   StackId: event.StackId,
-  //   PhysicalResourceId: "MyResourceId",
-  // };
+  return {
+    Status: "SUCCESS",
+    RequestId: event.RequestId,
+    LogicalResourceId: event.LogicalResourceId,
+    StackId: event.StackId,
+    PhysicalResourceId: "MyResourceId",
+  };
 };
