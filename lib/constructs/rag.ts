@@ -20,7 +20,10 @@ export class Rag extends Construct {
     const role = this.createServiceRole(sourceDataBucket, modelId);
 
     const collection = this.createOpenSearchCollection(name);
-    const createIndexFunction = this.createOpenSearchIndex(collection, modelId);
+    const { createIndexFunction, customResource } = this.createOpenSearchIndex(
+      collection,
+      modelId
+    );
     const policies = [
       this.createNetworkPolicy(name),
       this.createDataAccessPolicy(name, [role, createIndexFunction.role!]),
@@ -46,6 +49,9 @@ export class Rag extends Construct {
     });
 
     this.createTestLambda(knowledgeBase, "anthropic.claude-v2");
+    knowledgeBase.addDependency(
+      customResource.node.defaultChild as cdk.CfnResource
+    );
   }
 
   private createOpenSearchCollection(name: string) {
@@ -242,13 +248,17 @@ export class Rag extends Construct {
     );
 
     /** Updates only, if parameters change!! */
-    new cdk.CustomResource(this, "create-index-custom-resource", {
-      serviceToken: customResourceProvider.serviceToken,
-      properties: {
-        // UpdateTime: new Date().toISOString(),
-        MODEL_ID: modelId,
-      },
-    });
+    const customResource = new cdk.CustomResource(
+      this,
+      "create-index-custom-resource",
+      {
+        serviceToken: customResourceProvider.serviceToken,
+        properties: {
+          // UpdateTime: new Date().toISOString(),
+          MODEL_ID: modelId,
+        },
+      }
+    );
 
     createIndexFunction.role?.addManagedPolicy(
       new iam.ManagedPolicy(this, "aoss-policy", {
@@ -266,7 +276,7 @@ export class Rag extends Construct {
       value: createIndexFunction.functionArn,
     });
 
-    return createIndexFunction;
+    return { createIndexFunction, customResource };
   }
 
   private createServiceRole(
