@@ -1,7 +1,7 @@
 import * as env from "env-var";
 
 const KNOWLEDGEBASE_ID = env.get("KNOWLEDGEBASE_ID").required().asString();
-const AWS_REGION = env.get("AWS_REGION").required().asString();
+const MODEL_ARN = env.get("MODEL_ARN").required().asString();
 
 import * as kbr from "@aws-sdk/client-bedrock-agent-runtime";
 
@@ -23,5 +23,32 @@ export const handler = async (event: unknown) => {
   );
   console.log("Received response", response);
 
-  return;
+  const retrieveAndGenerateParams: kbr.RetrieveAndGenerateCommandInput = {
+    // sessionId: "" // To keep context
+    input: {
+      text: (event as any).query,
+    },
+    retrieveAndGenerateConfiguration: {
+      type: "KNOWLEDGE_BASE",
+      knowledgeBaseConfiguration: {
+        knowledgeBaseId: KNOWLEDGEBASE_ID,
+        modelArn: MODEL_ARN,
+      },
+    },
+  };
+
+  console.log(
+    "Sending retrieve and generate command",
+    retrieveAndGenerateParams
+  );
+  const generatedResponse = await bedrockClient.send(
+    new kbr.RetrieveAndGenerateCommand(retrieveAndGenerateParams)
+  );
+
+  console.log("Received response", generatedResponse);
+  return {
+    response,
+    generatedResponse,
+    output: generatedResponse.output,
+  };
 };

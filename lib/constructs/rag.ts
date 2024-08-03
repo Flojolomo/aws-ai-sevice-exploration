@@ -319,6 +319,10 @@ export class Rag extends Construct {
     knowledgeBase: bedrock.CfnKnowledgeBase,
     modelId: string
   ) {
+    const knowledgeBaseId = knowledgeBase.getAtt("KnowledgeBaseId").toString();
+    const modelArn = `arn:aws:bedrock:${
+      cdk.Stack.of(this).region
+    }::foundation-model/${modelId}`;
     const { function: testFunction } = new LambdaFunction(
       this,
       "test-knowledgebase-function",
@@ -330,13 +334,31 @@ export class Rag extends Construct {
             "lambda/query-knowledge-base/handler.ts"
           ),
           environment: {
-            MODEl_ID: modelId,
-            KNOWLEDGEBASE_ID: knowledgeBase
-              .getAtt("KnowledgeBaseId")
-              .toString(),
+            MODEL_ARN: modelArn,
+            KNOWLEDGEBASE_ID: knowledgeBaseId,
           },
+          timeout: cdk.Duration.seconds(30),
         },
       }
+    );
+
+    testFunction.role?.addManagedPolicy(
+      new iam.ManagedPolicy(this, "test-function-policy", {
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: [
+              "bedrock:Retrieve",
+              "bedrock:RetrieveAndGenerate",
+              "bedrock:InvokeModel",
+            ],
+            resources: [
+              knowledgeBase.getAtt("KnowledgeBaseArn").toString(),
+              modelArn,
+            ],
+          }),
+        ],
+      })
     );
 
     new cdk.CfnOutput(this, "test-knowledgebase-function-name", {

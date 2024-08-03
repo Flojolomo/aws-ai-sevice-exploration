@@ -97,3 +97,12 @@ AiDemoCasesStack.ragknowledgebaseid71AD2CD0 = MFLEQHIMEL
 > 'eyJxdWVyeSI6IkhlbGxvICJ9'
 > btoa(JSON.stringify({ query: "Give me 3 receipes"}))
 > 'eyJxdWVyeSI6IkdpdmUgbWUgMyByZWNlaXBlcyJ9'
+> btoa(JSON.stringify({ query: "Give me 3 receipes."}))
+> 'eyJxdWVyeSI6IkdpdmUgbWUgMyByZWNlaXBlcy4ifQ=='
+
+https://github.com/pistazie/cdk-dia
+
+is not authorized to perform: bedrock:Retrieve on resource: arn:aws:bedrock:eu-central-1:014498645519:knowledge-base/7FUUAPAFKM
+
+AiDemoCasesStack.ragdatasourceid36BF55BF = W78AMFLFCX
+AiDemoCasesStack.ragknowledgebaseid71AD2CD0 = 7FUUAPAFKM
