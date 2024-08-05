@@ -8,38 +8,50 @@ import { Construct } from "constructs";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { LambdaFunction } from "./lambda-function";
 import path = require("path");
+import * as logs from "aws-cdk-lib/aws-logs";
 
 export class Rag extends Construct {
   public constructor(scope: Construct, id: string) {
     super(scope, id);
 
     const sourceDataBucket = this.createDataSourceBucket();
-    // const name = "demo-example";
-    // const role = this.createServiceRole(sourceDataBucket);
+    const name = "demo-example";
+    const modelId = "cohere.embed-english-v3";
+    const role = this.createServiceRole(sourceDataBucket, modelId);
 
-    // const collection = this.createOpenSearchCollection(name);
-    // const createIndexFunction = this.createOpenSearchIndex(collection);
-    // const policies = [
-    //   this.createNetworkPolicy(name),
-    //   this.createDataAccessPolicy(name, [
-    //     role,
-    //     createIndexFunction.function.role!,
-    //   ]),
-    //   this.createEncryptionPolicy(name),
-    // ];
-    // for (const policy of policies) {
-    //   collection.addDependency(policy);
-    // }
+    const collection = this.createOpenSearchCollection(name);
+    const { createIndexFunction, customResource } = this.createOpenSearchIndex(
+      collection,
+      modelId
+    );
+    const policies = [
+      this.createNetworkPolicy(name),
+      this.createDataAccessPolicy(name, [role, createIndexFunction.role!]),
+      this.createEncryptionPolicy(name),
+    ];
+    for (const policy of policies) {
+      collection.addDependency(policy);
+    }
 
-    // role.addToPolicy(
-    //   new iam.PolicyStatement({
-    //     effect: iam.Effect.ALLOW,
-    //     actions: ["aoss:*"],
-    //     resources: [collection.attrArn],
-    //   })
-    // );
+    role.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["aoss:*"],
+        resources: [collection.attrArn],
+      })
+    );
 
-    // this.createKnowledgeBase({ collection, role });
+    const knowledgeBase = this.createKnowledgeBase({
+      bucket: sourceDataBucket,
+      modelId,
+      collection,
+      role,
+    });
+
+    this.createTestLambda(knowledgeBase, "anthropic.claude-v2");
+    knowledgeBase.addDependency(
+      customResource.node.defaultChild as cdk.CfnResource
+    );
   }
 
   private createOpenSearchCollection(name: string) {
@@ -51,6 +63,11 @@ export class Rag extends Construct {
     });
 
     collection.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+
+    new cdk.CfnOutput(this, "collection-arn", {
+      value: collection.attrArn,
+    });
+
     return collection;
   }
 
@@ -78,12 +95,15 @@ export class Rag extends Construct {
                 "aoss:ReadDocument",
                 "aoss:WriteDocument",
                 "aoss:CreateIndex",
+                // TMP
+                "aoss:DeleteIndex",
               ],
               ResourceType: "index",
             },
           ],
           Principal: [
             ...roles.map((role) => role.roleArn),
+            "arn:aws:sts::014498645519:assumed-role/AWSReservedSSO_AWSAdministratorAccess_2e415d69fac08946/florian1siegel@googlemail.com",
             new iam.AccountPrincipal(cdk.Stack.of(this).account).arn,
           ],
           Description: "",
@@ -121,22 +141,26 @@ export class Rag extends Construct {
   }
 
   private createKnowledgeBase({
+    bucket,
     collection,
+    modelId,
     role,
   }: {
+    bucket: s3.Bucket;
     collection: osServerless.CfnCollection;
+    modelId: string;
     role: iam.Role;
   }) {
-    return new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
+    const knowledgeBase = new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
       name: "demo-example",
       roleArn: role.roleArn,
       storageConfiguration: {
         opensearchServerlessConfiguration: {
           collectionArn: collection.attrArn,
-          vectorIndexName: "bedrock-knowledge-base-default-index",
+          vectorIndexName: "my-index",
           fieldMapping: {
-            metadataField: "AMAZON_BEDROCK_METADATA",
             vectorField: "bedrock-knowledge-base-default-vector",
+            metadataField: "AMAZON_BEDROCK_METADATA",
             textField: "AMAZON_BEDROCK_TEXT_CHUNK",
           },
         },
@@ -145,11 +169,33 @@ export class Rag extends Construct {
       knowledgeBaseConfiguration: {
         type: "VECTOR",
         vectorKnowledgeBaseConfiguration: {
-          embeddingModelArn:
-            "arn:aws:bedrock:eu-central-1::foundation-model/cohere.embed-english-v3",
+          embeddingModelArn: `arn:aws:bedrock:eu-central-1::foundation-model/${modelId}`,
         },
       },
     });
+
+    const dataSource = new bedrock.CfnDataSource(this, "data-source", {
+      name: "demo-example",
+      knowledgeBaseId: knowledgeBase.ref,
+      // Otherwise the deletion fails due to permissions issues
+      dataDeletionPolicy: "RETAIN",
+      dataSourceConfiguration: {
+        type: "S3",
+        s3Configuration: {
+          bucketArn: bucket.bucketArn,
+        },
+      },
+    });
+
+    new cdk.CfnOutput(this, "knowledge-base-id", {
+      value: knowledgeBase.getAtt("KnowledgeBaseId").toString(),
+    });
+
+    new cdk.CfnOutput(this, "data-source-id", {
+      value: dataSource.getAtt("DataSourceId").toString(),
+    });
+
+    return knowledgeBase;
   }
 
   private createNetworkPolicy(name: string) {
@@ -174,17 +220,47 @@ export class Rag extends Construct {
     });
   }
 
-  private createOpenSearchIndex(collection: osServerless.CfnCollection) {
-    const createIndexFunction = new LambdaFunction(this, "create-index", {
-      functionProps: {
-        entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
-        environment: {
-          OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
+  private createOpenSearchIndex(
+    collection: osServerless.CfnCollection,
+    modelId: string
+  ) {
+    const { function: createIndexFunction } = new LambdaFunction(
+      this,
+      "create-index",
+      {
+        functionProps: {
+          entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
+          environment: {
+            OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
+            MODEL_ID: modelId,
+          },
         },
-      },
-    });
+      }
+    );
 
-    createIndexFunction.function.role?.addManagedPolicy(
+    const customResourceProvider = new cr.Provider(
+      this,
+      "create-index-provider",
+      {
+        onEventHandler: createIndexFunction,
+        logRetention: logs.RetentionDays.ONE_DAY,
+      }
+    );
+
+    /** Updates only, if parameters change!! */
+    const customResource = new cdk.CustomResource(
+      this,
+      "create-index-custom-resource",
+      {
+        serviceToken: customResourceProvider.serviceToken,
+        properties: {
+          // UpdateTime: new Date().toISOString(),
+          MODEL_ID: modelId,
+        },
+      }
+    );
+
+    createIndexFunction.role?.addManagedPolicy(
       new iam.ManagedPolicy(this, "aoss-policy", {
         statements: [
           new iam.PolicyStatement({
@@ -197,13 +273,16 @@ export class Rag extends Construct {
     );
 
     new cdk.CfnOutput(this, "create-index-function-arn", {
-      value: createIndexFunction.function.functionArn,
+      value: createIndexFunction.functionArn,
     });
 
-    return createIndexFunction;
+    return { createIndexFunction, customResource };
   }
 
-  private createServiceRole(dataSourceBucket: s3.Bucket) {
+  private createServiceRole(
+    dataSourceBucket: s3.Bucket,
+    embeddingModelId: string
+  ) {
     const role = new iam.Role(this, "knowledge-base-role", {
       assumedBy: new iam.ServicePrincipal("bedrock.amazonaws.com"),
     });
@@ -221,10 +300,69 @@ export class Rag extends Construct {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["bedrock:InvokeModel"],
-        resources: ["*"],
+        resources: [
+          "*",
+          // TODO limit to the model used in the knowledge base
+          `arn:aws:bedrock:eu-central-1::foundation-model/${embeddingModelId}`,
+        ],
       })
     );
 
+    new cdk.CfnOutput(this, "knowledge-base-role-arn", {
+      value: role.roleArn,
+    });
+
     return role;
+  }
+
+  private createTestLambda(
+    knowledgeBase: bedrock.CfnKnowledgeBase,
+    modelId: string
+  ) {
+    const knowledgeBaseId = knowledgeBase.getAtt("KnowledgeBaseId").toString();
+    const modelArn = `arn:aws:bedrock:${
+      cdk.Stack.of(this).region
+    }::foundation-model/${modelId}`;
+    const { function: testFunction } = new LambdaFunction(
+      this,
+      "test-knowledgebase-function",
+      {
+        functionProps: {
+          entry: path.join(
+            __dirname,
+            "..",
+            "lambda/query-knowledge-base/handler.ts"
+          ),
+          environment: {
+            MODEL_ARN: modelArn,
+            KNOWLEDGEBASE_ID: knowledgeBaseId,
+          },
+          timeout: cdk.Duration.seconds(30),
+        },
+      }
+    );
+
+    testFunction.role?.addManagedPolicy(
+      new iam.ManagedPolicy(this, "test-function-policy", {
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: [
+              "bedrock:Retrieve",
+              "bedrock:RetrieveAndGenerate",
+              "bedrock:InvokeModel",
+            ],
+            resources: [
+              knowledgeBase.getAtt("KnowledgeBaseArn").toString(),
+              modelArn,
+            ],
+          }),
+        ],
+      })
+    );
+
+    new cdk.CfnOutput(this, "test-knowledgebase-function-name", {
+      value: testFunction.functionName,
+    });
   }
 }

@@ -23,18 +23,22 @@
   },
   "dependencies": {
     "@aws-lambda-powertools/logger": "^2.6.0",
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.623.0",
     "@aws-sdk/client-opensearch": "^3.620.1",
     "@aws-sdk/client-polly": "^3.620.1",
     "@aws-sdk/client-s3": "^3.620.0",
     "@aws-sdk/client-transcribe": "^3.620.0",
     "@aws-sdk/client-translate": "^3.620.0",
+    "@aws-sdk/credential-provider-node": "^3.622.0",
     "@aws-solutions-constructs/aws-s3-sns": "^2.63.0",
     "@opensearch-project/opensearch": "^2.11.0",
     "@types/aws-lambda": "^8.10.142",
     "@types/cfn-response": "^1.0.8",
     "aws-cdk-lib": "2.150.0",
+    "cdk-self-destruct": "^1.2.5",
     "cfn-response": "^1.0.1",
     "constructs": "^10.0.0",
+    "env-var": "^7.5.0",
     "esbuild": "^0.23.0",
     "source-map-support": "^0.5.21"
   }

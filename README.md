@@ -25,6 +25,8 @@ This repository uses CDK as IaC tool. To deploy in your AWS account, make sure t
 
 It will create resources with unique names to avoid collisions. The names are cryptic, hence the use of CloudFormation outputs is recommended for exploring.
 
+The stack is set up to delete itself after a defined period. This intends to save money, since OpenSearch Serverless is a very expensive service.
+
 ### Exploring
 
 #### Text Processing
@@ -43,3 +45,7 @@ to initiate the processing chain, you can upload an audio file to `<bucket name>
 Happy
 
 ![architecture](./docs/architecture-diagram.drawio.svg)
+
+#### RAG
+
+The RAG application is provisioned, including an S3 bucket as data source for the data ingestion, an OpenSearch Serverless Cluster & a knowledge base. For evaluation purposes, a lambda function is provisioned to retrieve & generate content with help of the knowledge base.
