@@ -25,6 +25,8 @@ This repository uses CDK as IaC tool. To deploy in your AWS account, make sure t
 
 It will create resources with unique names to avoid collisions. The names are cryptic, hence the use of CloudFormation outputs is recommended for exploring.
 
+The stack is set up to delete itself after a defined period. This intends to save money, since OpenSearch Serverless is a very expensive service.
+
 ### Exploring
 
 #### Text Processing
@@ -44,65 +46,6 @@ Happy
 
 ![architecture](./docs/architecture-diagram.drawio.svg)
 
-##
+#### RAG
 
-Ideas:
-
-- Stream open search logs to cloudwatch https://docs.aws.amazon.com/opensearch-service/latest/developerguide/createdomain-configure-slow-logs.html
-- Multiple data sources for one knowledge base
-- Multiple indices for open search / multiple knowledge bases
-- Trigger first sync if S3 is injected
-
-## Notes
-
-`aws bedrock-agent start-ingestion-job --knowledge-base-id 22EPIWCVCS --data-source-id 5BE35OW5YK`
-
-PUT bedrock-knowledge-base
-
-```json
-{
-  "aliases": {},
-  "mappings": {
-    "properties": {
-      "AMAZON_BEDROCK_METADATA": {
-        "type": "text",
-        "index": false
-      },
-      "AMAZON_BEDROCK_TEXT_CHUNK": {
-        "type": "text"
-      },
-      "bedrock-knowledge-base-default-vector": {
-        "type": "knn_vector",
-        "dimension": 1536,
-        "method": {
-          "engine": "faiss",
-          "space_type": "l2",
-          "name": "hnsw",
-          "parameters": {}
-        }
-      }
-    }
-  }
-}
-```
-
-https://opensearch.org/docs/latest/clients/javascript/index/#connecting-to-opensearch
-
-![alt text](image.png)
-
-AiDemoCasesStack.ragdatasourceid36BF55BF = OPWJUJCIYV
-AiDemoCasesStack.ragknowledgebaseid71AD2CD0 = MFLEQHIMEL
-
-> btoa(JSON.stringify({ query: "Hello "}))
-> 'eyJxdWVyeSI6IkhlbGxvICJ9'
-> btoa(JSON.stringify({ query: "Give me 3 receipes"}))
-> 'eyJxdWVyeSI6IkdpdmUgbWUgMyByZWNlaXBlcyJ9'
-> btoa(JSON.stringify({ query: "Give me 3 receipes."}))
-> 'eyJxdWVyeSI6IkdpdmUgbWUgMyByZWNlaXBlcy4ifQ=='
-
-https://github.com/pistazie/cdk-dia
-
-is not authorized to perform: bedrock:Retrieve on resource: arn:aws:bedrock:eu-central-1:014498645519:knowledge-base/7FUUAPAFKM
-
-AiDemoCasesStack.ragdatasourceid36BF55BF = W78AMFLFCX
-AiDemoCasesStack.ragknowledgebaseid71AD2CD0 = 7FUUAPAFKM
+The RAG application is provisioned, including an S3 bucket as data source for the data ingestion, an OpenSearch Serverless Cluster & a knowledge base. For evaluation purposes, a lambda function is provisioned to retrieve & generate content with help of the knowledge base.
