@@ -8,6 +8,13 @@ interface EmbeddingModelInfo {
   provider: string;
 }
 
+interface IndexConfiguration {
+  VECTOR_FIELD: string;
+  DIMENSION: number;
+  MAPPING_FIELD_TEXT_CHUNK: string;
+  MAPPING_FIELD_METADATA: string;
+}
+
 const bedrockEmbeddingModels: Record<string, EmbeddingModelInfo> = {
   "amazon.titan-embed-text-v1": { dimension: 1536, provider: "Amazon" },
   "amazon.titan-embed-image-v1": { dimension: 1024, provider: "Amazon" },
@@ -23,7 +30,7 @@ import {
 } from "aws-lambda";
 import * as env from "env-var";
 
-const MODEL_ID = env.get("MODEL_ID").required().asString();
+// const MODEL_ID = env.get("MODEL_ID").required().asString();
 const OPENSEARCH_DOMAIN = env.get("OPENSEARCH_DOMAIN").required().asString();
 const AWS_REGION = env.get("AWS_REGION").required().asString();
 
@@ -51,26 +58,55 @@ export const handler = async (
   event: CloudFormationCustomResourceEvent
 ): Promise<CloudFormationCustomResourceResponse> => {
   console.log("#####", event);
-  if (
-    await (
-      await openSearchClient.indices.exists({ index: "my-index" })
-    ).body
-  ) {
-    console.log("Index already exists");
-    return {
-      Status: "SUCCESS",
-      RequestId: event.RequestId,
-      LogicalResourceId: event.LogicalResourceId,
-      StackId: event.StackId,
-      PhysicalResourceId: "MyResourceId",
-    };
+
+  const embeddingModelId = event.ResourceProperties.EMBEDDING_MODEL_ID;
+  const indexName = event.ResourceProperties.INDEX_NAME;
+  const deleteOldIndices = event.ResourceProperties.DELETE_OLD_INDICES;
+  const indexConfiguration = event.ResourceProperties.INDEX_CONFIGURATION;
+
+  if (!embeddingModelId) {
+    throw new Error("Missing EMBEDDING_MODEL_ID in ResourceProperties");
   }
 
-  const { dimension } =
-    bedrockEmbeddingModels[event.ResourceProperties.MODEL_ID];
-  console.log("Creating index with vecotr length: ", dimension);
+  const modelProperties = bedrockEmbeddingModels[embeddingModelId];
+  if (!modelProperties) {
+    throw new Error(
+      `Unknown model ID: ${embeddingModelId}. Failed to identify model properties.`
+    );
+  }
+
+  if (!indexName) {
+    throw new Error("Missing INDEX_NAME in ResourceProperties");
+  }
+
+  if (!deleteOldIndices) {
+    throw new Error("Missing DELETE_OLD_INDICES in ResourceProperties");
+  }
+
+  if (!indexConfiguration) {
+    throw new Error("Missing INDEX_CONFIGURATION in ResourceProperties");
+  }
+
+  await verifyIndexExists(indexName, indexConfiguration);
+  if (deleteOldIndices) {
+    await deleteStaleIndices(indexName);
+  }
+
+  return {
+    Status: "SUCCESS",
+    RequestId: event.RequestId,
+    LogicalResourceId: event.LogicalResourceId,
+    StackId: event.StackId,
+    PhysicalResourceId: "MyResourceId", // TODO
+  };
+};
+
+async function createIndex(
+  name: string,
+  indexConfiguration: IndexConfiguration
+) {
   await openSearchClient.indices.create({
-    index: "my-index",
+    index: name,
     body: {
       settings: {
         index: {
@@ -79,51 +115,52 @@ export const handler = async (
       },
       mappings: {
         properties: {
-          AMAZON_BEDROCK_METADATA: {
+          [indexConfiguration.MAPPING_FIELD_METADATA]: {
             type: "text",
             index: false,
           },
-          AMAZON_BEDROCK_TEXT_CHUNK: {
+          [indexConfiguration.MAPPING_FIELD_TEXT_CHUNK]: {
             type: "text",
             index: true,
           },
-          "bedrock-knowledge-base-default-vector": {
+          [indexConfiguration.VECTOR_FIELD]: {
             type: "knn_vector",
-            dimension: 1024,
+            dimension: Number(indexConfiguration.DIMENSION),
             method: {
               name: "hnsw",
               space_type: "l2",
               engine: "faiss",
-              // parameters: {
-              //   ef_construction: 512,
-              //   m: 16,
-              // },
             },
-            // type: "knn_vector",
-            // dimension: dimension,
-            // engine: "faiss",
-            // space_type: "l2",
-            // name: "hnsw",
-            // parameters: {},
           },
         },
       },
     },
   });
-  // switch (event.RequestType) {
-  //   case "Create":
-  //     console.log("Creating some resource");
-  //   case "Update":
-  //     console.log("Updating some resource");
-  //   case "Delete":
-  //     console.log("Updating some resource");
-  // }
+}
 
-  return {
-    Status: "SUCCESS",
-    RequestId: event.RequestId,
-    LogicalResourceId: event.LogicalResourceId,
-    StackId: event.StackId,
-    PhysicalResourceId: "MyResourceId",
-  };
-};
+async function verifyIndexExists(
+  indexName: string,
+  indexConfiguration: IndexConfiguration
+) {
+  const indexExists = await (
+    await openSearchClient.indices.exists({ index: indexName })
+  ).body;
+  if (!indexExists) {
+    console.log("Creating index ", indexConfiguration);
+
+    await createIndex(indexName, indexConfiguration);
+    console.log("Index created");
+  }
+}
+
+async function deleteStaleIndices(currentIndexName: string) {
+  const indices = (await openSearchClient.cat.indices({ format: "json" })).body;
+  indices.forEach(async ({ index }: { index: string }) => {
+    if (index === currentIndexName) {
+      return;
+    }
+
+    console.log("Deleting index: ", index);
+    await openSearchClient.indices.delete({ index: index });
+  });
+}
