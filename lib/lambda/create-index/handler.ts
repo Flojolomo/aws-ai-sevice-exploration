@@ -14,22 +14,12 @@ interface IndexConfiguration {
   MAPPING_FIELD_METADATA: string;
 }
 
-const bedrockEmbeddingModels: Record<string, EmbeddingModelInfo> = {
-  "amazon.titan-embed-text-v1": { dimension: 1536, provider: "Amazon" },
-  "amazon.titan-embed-image-v1": { dimension: 1024, provider: "Amazon" },
-  "amazon.titan-embed-g1-text-02": { dimension: 1536, provider: "Amazon" },
-  "amazon.titan-embed-g1-text-01": { dimension: 4096, provider: "Amazon" },
-  "cohere.embed-english-v3": { dimension: 1024, provider: "Cohere" },
-  "cohere.embed-multilingual-v3": { dimension: 1024, provider: "Cohere" },
-};
-
 import {
   CloudFormationCustomResourceEvent,
   CloudFormationCustomResourceResponse,
 } from "aws-lambda";
 import * as env from "env-var";
 
-// const MODEL_ID = env.get("MODEL_ID").required().asString();
 const OPENSEARCH_DOMAIN = env.get("OPENSEARCH_DOMAIN").required().asString();
 const AWS_REGION = env.get("AWS_REGION").required().asString();
 
@@ -53,6 +43,7 @@ const openSearchClient = new Client({
   node: OPENSEARCH_DOMAIN,
 });
 
+// TODO structured logging
 export const handler = async (
   event: CloudFormationCustomResourceEvent
 ): Promise<CloudFormationCustomResourceResponse> => {
@@ -71,13 +62,13 @@ export const handler = async (
 
   if (event.RequestType === "Delete") {
     console.log("Deleting index ", indexName);
+    deleteIndex(indexName);
     return {
       Status: "SUCCESS",
       RequestId: event.RequestId,
       LogicalResourceId: event.LogicalResourceId,
       StackId: event.StackId,
-      //  Could be index name TODO need to verify with multiple KBs
-      PhysicalResourceId: "MyResourceId", // TODO
+      PhysicalResourceId: indexName,
     };
   }
 
@@ -88,8 +79,7 @@ export const handler = async (
     RequestId: event.RequestId,
     LogicalResourceId: event.LogicalResourceId,
     StackId: event.StackId,
-    //  Could be index name TODO need to verify with multiple KBs
-    PhysicalResourceId: "MyResourceId", // TODO
+    PhysicalResourceId: indexName,
   };
 };
 
@@ -147,17 +137,6 @@ async function verifyIndexExists(
   console.log("Index exists");
 }
 
-async function deleteStaleIndices(currentIndexName: string) {
-  console.log("Deleting stale indices");
-  const indices = (await openSearchClient.cat.indices({ format: "json" })).body;
-  await Promise.all(
-    indices.map(async ({ index }: { index: string }) => {
-      if (index === currentIndexName) {
-        return;
-      }
-
-      console.log("Deleting index: ", index);
-      await openSearchClient.indices.delete({ index: index });
-    })
-  );
+async function deleteIndex(indexName: string) {
+  await openSearchClient.indices.delete({ index: indexName });
 }

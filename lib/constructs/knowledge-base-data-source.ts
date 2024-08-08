@@ -21,13 +21,13 @@ export type ChunkingConfiguration =
       };
     };
 
-interface KnowledgeBaseDataSourceProps {
+export interface KnowledgeBaseDataSourceProps {
   name: string;
   bucket: s3.IBucket;
+  dataDeletionPolicy?: "DELETE" | "RETAIN";
   chunkingConfiguration?: ChunkingConfiguration;
   description?: string;
   inclusionPrefixes?: string[];
-  kmsKeyArn?: string;
   knowledgeBase: bedrock.CfnKnowledgeBase;
 }
 
@@ -41,16 +41,13 @@ export class KnowledgeBaseDataSource extends bedrock.CfnDataSource {
       description: props.description,
       name: props.name,
       knowledgeBaseId: props.knowledgeBase.ref,
-      dataDeletionPolicy: "RETAIN",
+      dataDeletionPolicy: props.dataDeletionPolicy ?? "DELETE",
       dataSourceConfiguration: {
         type: "S3",
         s3Configuration: {
           bucketArn: props.bucket.bucketArn,
           inclusionPrefixes: props.inclusionPrefixes,
         },
-      },
-      serverSideEncryptionConfiguration: {
-        kmsKeyArn: props.kmsKeyArn,
       },
       vectorIngestionConfiguration: {
         chunkingConfiguration: props.chunkingConfiguration ?? {

@@ -28,25 +28,46 @@ export class AiDemoCasesStack extends cdk.Stack {
 
     vectorStore.grantRead(new iam.AccountPrincipal(cdk.Stack.of(this).account));
 
-    new KnowledgeBase(this, "knowledge-base", {
+    const knowledge = new KnowledgeBase(this, "knowledge-base", {
       embeddingModel,
       vectorDimension: 1024,
       vectorStore,
     });
 
-    // knowledgeBase.addDependency(vectorStore);
+    knowledge.addDataSource("nr-four", {
+      chunkingConfiguration: {
+        chunkingStrategy: "FIXED_SIZE",
+        fixedSizeChunkingConfiguration: {
+          maxTokens: 100,
+          overlapPercentage: 10,
+        },
+      },
+    });
 
-    // new SelfDestruct(this, "SelfDestruct", {
-    //   defaultBehavior: {
-    //     destoryAllResources: true,
-    //     purgeResourceDependencies: true,
-    //   },
-    //   trigger: {
-    //     scheduled: {
-    //       afterDuration: cdk.Duration.hours(4),
-    //       enabled: true,
-    //     },
-    //   },
-    // });
+    const titanEmbedding = FoundationModel.fromFoundationModelId(
+      this,
+      "embedding-model-2",
+      {
+        modelId: "amazon.titan-embed-text-v1",
+      }
+    );
+    new KnowledgeBase(this, "titan-embedding-knowledge-base", {
+      embeddingModel: titanEmbedding,
+      vectorDimension: 1536,
+      vectorStore,
+    });
+
+    new SelfDestruct(this, "SelfDestruct", {
+      defaultBehavior: {
+        destoryAllResources: true,
+        purgeResourceDependencies: true,
+      },
+      trigger: {
+        scheduled: {
+          afterDuration: cdk.Duration.hours(4),
+          enabled: true,
+        },
+      },
+    });
   }
 }

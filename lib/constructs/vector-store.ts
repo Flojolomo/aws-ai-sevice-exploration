@@ -7,9 +7,6 @@ import { LambdaFunction } from "./lambda-function";
 import * as path from "path";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as logs from "aws-cdk-lib/aws-logs";
-import { CfnResource } from "aws-cdk-lib";
-import { Port } from "aws-cdk-lib/aws-ec2";
-import { FoundationModel } from "aws-cdk-lib/aws-bedrock";
 import { OpenSearchDataAccessPolicy } from "./open-search-data-access-policy";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 
@@ -78,6 +75,7 @@ export class VectorStore extends Construct {
           environment: {
             OPENSEARCH_DOMAIN: this.collection.attrCollectionEndpoint,
           },
+          timeout: cdk.Duration.minutes(5),
         },
       }
     );
@@ -100,13 +98,7 @@ export class VectorStore extends Construct {
           new iam.PolicyStatement({
             sid: "AllowCreateIndex",
             effect: iam.Effect.ALLOW,
-            actions: [
-              // "aoss:DescribeCollection",
-              // "aoss:DescribeIndex",
-              // "aoss:CreateIndex",
-              // TODO scope down permissions - might move to data access policy
-              "aoss:APIAccessAll",
-            ],
+            actions: ["aoss:APIAccessAll"],
             // When passing in the collection, there is a circular dependency
             resources: ["*"],
           }),
@@ -192,7 +184,7 @@ export class VectorStore extends Construct {
   public createIndex(indexName: string, config: IndexConfiguration) {
     const customResource = new cdk.CustomResource(
       this,
-      `create-index-${cdk.Names.uniqueId(this)}`,
+      `${cdk.Names.uniqueResourceName(this, {})}-${indexName}`,
       {
         serviceToken: this.customResourceProvider.serviceToken,
         properties: {
