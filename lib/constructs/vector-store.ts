@@ -7,6 +7,7 @@ import { LambdaFunction } from "./lambda-function";
 import * as path from "path";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as logs from "aws-cdk-lib/aws-logs";
+import { CfnResource } from "aws-cdk-lib";
 
 interface VectorStoreProps {
   embeddingModelId: string;
@@ -14,6 +15,9 @@ interface VectorStoreProps {
   indexName: string;
   deleteOldIndices?: boolean;
   enableStandbyReplicas?: boolean;
+  readRoles?: iam.IRole[];
+  writeRoles?: iam.IRole[];
+  readWriteRoles?: iam.IRole[];
 }
 
 type DataAccessPolicyStatement = {
@@ -26,21 +30,26 @@ type DataAccessPolicyStatement = {
   Description?: string;
 };
 
-export class VectorStore extends Construct {
+export class VectorStore extends cdk.NestedStack {
   public readonly collection: osServerless.CfnCollection;
+  public readonly embeddingModelId: string;
+  public readonly vectorIndexName: string;
+
+  public readonly fieldMapping = {
+    vectorField: "bedrock-knowledge-base-vector", // Updating this name is not supported!! Does not have effect
+    metadataField: "AMAZON_BEDROCK_METADATA",
+    textField: "AMAZON_BEDROCK_TEXT_CHUNK",
+  };
 
   private readonly dataAccessPolicy: osServerless.CfnAccessPolicy;
   private readonly dataAccessPolicyDocument: Array<DataAccessPolicyStatement> =
     [];
-  private readonly deleteOldIndices: boolean;
-
-  private readonly mappingFieldMetadata = "AMAZON_BEDROCK_METADATA";
-  private readonly mappingFieldTextChunk = "AMAZON_BEDROCK_TEXT_CHUNK";
-  private readonly vectorField = "bedrock-knowledge-base-default-vector";
 
   public constructor(scope: Construct, id: string, props: VectorStoreProps) {
     super(scope, id);
-    this.deleteOldIndices = props.deleteOldIndices ?? false;
+
+    this.vectorIndexName = props.indexName;
+    this.embeddingModelId = props.embeddingModelId;
 
     this.collection = this.createCollection({ name: props.name });
     const { customResource, executionRole } = this.createIndex({
@@ -67,9 +76,29 @@ export class VectorStore extends Construct {
     }
 
     this.grantRead(new iam.AccountPrincipal(cdk.Stack.of(this).account).arn);
+    props.readRoles?.forEach((role) => this.grantRead(role.roleArn));
+    props.writeRoles?.forEach((role) => this.grantWrite(role.roleArn));
+
+    // this.node.addDependency(customResource);
   }
 
-  public grantRead(arn: string): void {
+  // private addDependencyOnAllChildren() {
+  //   const children = this.node.findAll();
+
+  //   children.forEach(child => {
+  //     if (child instanceof CfnResource) {
+  //       this.node.addDependency(child);
+  //     }
+  //   });
+  // }
+
+  public grantRead(grantee: iam.IGrantable): void {
+    iam.Grant.addToPrincipalOrResource({
+      grantee,
+      actions: ["aoss:ReadDocument"],
+      resourceArns: [`index/${this.collection.name}/*`],
+      resource: this.dataAccessPolicy,
+    });
     this.dataAccessPolicyDocument.push({
       Rules: [
         {
@@ -83,7 +112,7 @@ export class VectorStore extends Construct {
           ResourceType: "index",
         },
       ],
-      Principal: [arn],
+      Principal: [role.roleArn],
     });
 
     this.dataAccessPolicy.policy = JSON.stringify(
@@ -91,7 +120,7 @@ export class VectorStore extends Construct {
     );
   }
 
-  public grantWrite(role: iam.IRole): void {
+  public grantWrite(roleArn: string): void {
     // TODO
   }
 
@@ -112,11 +141,9 @@ export class VectorStore extends Construct {
           Permission: [
             "aoss:UpdateIndex",
             "aoss:DescribeIndex",
-            "aoss:DeleteIndex",
             "aoss:CreateIndex",
             "aoss:ReadDocument",
             "aoss:WriteDocument",
-            // TMP
           ],
           ResourceType: "index",
         },
@@ -125,8 +152,24 @@ export class VectorStore extends Construct {
       Description: "",
     });
 
-    this.node.addDependency(role);
-    this.dataAccessPolicy.policy;
+    this.dataAccessPolicy.policy = JSON.stringify(
+      this.dataAccessPolicyDocument
+    );
+
+    role.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        sid: "AllowCreateIndex",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "aoss:DescribeCollection",
+          "aoss:DescribeIndex",
+          "aoss:CreateIndex",
+          // TODO scope down permissions - might move to data access policy
+          "aoss:*",
+        ],
+        resources: ["*"],
+      })
+    );
   }
 
   private createCollection({
@@ -256,15 +299,14 @@ export class VectorStore extends Construct {
       {
         serviceToken: customResourceProvider.serviceToken,
         properties: {
-          DATE: Date.now(),
           DELETE_OLD_INDICES: deleteOldIndices,
           EMBEDDING_MODEL_ID: embeddingModelId,
           INDEX_NAME: indexName,
           INDEX_CONFIGURATION: {
-            DIMENSION: 1024,
-            MAPPING_FIELD_METADATA: this.mappingFieldMetadata,
-            MAPPING_FIELD_TEXT_CHUNK: this.mappingFieldTextChunk,
-            VECTOR_FIELD: this.vectorField,
+            DIMENSION: 1024, // TODO depending of model
+            MAPPING_FIELD_METADATA: this.fieldMapping.metadataField,
+            MAPPING_FIELD_TEXT_CHUNK: this.fieldMapping.textField,
+            VECTOR_FIELD: this.fieldMapping.vectorField,
           },
         },
       }

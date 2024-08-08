@@ -1,6 +1,5 @@
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
 import { Client } from "@opensearch-project/opensearch";
-import { IndicesIndexSettings } from "@opensearch-project/opensearch/api/types";
 import { AwsSigv4Signer } from "@opensearch-project/opensearch/aws";
 
 interface EmbeddingModelInfo {
@@ -151,16 +150,21 @@ async function verifyIndexExists(
     await createIndex(indexName, indexConfiguration);
     console.log("Index created");
   }
+
+  console.log("Index exists");
 }
 
 async function deleteStaleIndices(currentIndexName: string) {
+  console.log("Deleting stale indices");
   const indices = (await openSearchClient.cat.indices({ format: "json" })).body;
-  indices.forEach(async ({ index }: { index: string }) => {
-    if (index === currentIndexName) {
-      return;
-    }
+  await Promise.all(
+    indices.map(async ({ index }: { index: string }) => {
+      if (index === currentIndexName) {
+        return;
+      }
 
-    console.log("Deleting index: ", index);
-    await openSearchClient.indices.delete({ index: index });
-  });
+      console.log("Deleting index: ", index);
+      await openSearchClient.indices.delete({ index: index });
+    })
+  );
 }
