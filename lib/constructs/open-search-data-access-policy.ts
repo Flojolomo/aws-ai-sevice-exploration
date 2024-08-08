@@ -188,6 +188,7 @@ export class OpenSearchDataAccessPolicy
           "aoss:CreateIndex",
           "aoss:ReadDocument",
           "aoss:WriteDocument",
+          "aoss:DeleteIndex",
         ],
         effect: iam.Effect.ALLOW,
         principals: [grantee.grantPrincipal],
