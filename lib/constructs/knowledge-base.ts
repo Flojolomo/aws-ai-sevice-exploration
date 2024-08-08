@@ -5,21 +5,19 @@ import * as osServerless from "aws-cdk-lib/aws-opensearchserverless";
 import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { KnowledgeBaseDataSource } from "./knowledge-base-data-source";
+import { VectorStore } from "./vector-store";
+import { CronOptions } from "aws-cdk-lib/aws-events";
 
 interface KnowledgeBaseProps {
   embeddingModel: bedrock.FoundationModel;
-  collection: osServerless.CfnCollection;
-  vectorIndexName: string;
-  serviceRole: iam.Role;
+  vectorDimension: number;
+  vectorStore: VectorStore;
   sourceBucket?: s3.Bucket;
-  fieldMapping: {
-    vectorField: string;
-    metadataField: string;
-    textField: string;
-  };
+  syncSchedule?: CronOptions;
+  syncOnCreate?: boolean;
 }
 
-export class KnowledgeBase extends cdk.NestedStack {
+export class KnowledgeBase extends Construct {
   public readonly role: iam.Role;
   public readonly knowledgeBase: bedrock.CfnKnowledgeBase;
   public readonly dataSource: bedrock.CfnDataSource;
@@ -27,26 +25,51 @@ export class KnowledgeBase extends cdk.NestedStack {
   public constructor(scope: Construct, id: string, props: KnowledgeBaseProps) {
     super(scope, id);
 
-    this.role = props.serviceRole;
+    this.role = new iam.Role(this, "knowledge-base-role", {
+      assumedBy: new iam.ServicePrincipal("bedrock.amazonaws.com"),
+    });
 
     const sourceBucket =
-      props.sourceBucket ?? new s3.Bucket(this, "source-bucket");
+      props.sourceBucket ??
+      new s3.Bucket(this, "source-bucket", {
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+        autoDeleteObjects: true,
+      });
 
-    const grantable = sourceBucket.grantRead(this.role);
-    grantable.assertSuccess();
-
-    const knowledgeBaseName = `${cdk.Names.uniqueResourceName(this, {
+    const knowledgeBaseName = cdk.Names.uniqueResourceName(this, {
       maxLength: 64,
-    })}-${props.vectorIndexName}`;
+    });
+
+    props.vectorStore.grantReadWrite(this.role);
+    sourceBucket.grantReadWrite(this.role);
+    this.role.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:InvokeModel"],
+        resources: [props.embeddingModel.modelArn],
+      })
+    );
+
+    const indexName = knowledgeBaseName.toLowerCase();
+    const index = props.vectorStore.createIndex(indexName, {
+      dimension: props.vectorDimension,
+      metadataField: "METADATA",
+      textField: "TEXT_CHUNK",
+      vectorField: knowledgeBaseName,
+    });
 
     this.knowledgeBase = new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
       name: knowledgeBaseName,
-      roleArn: props.serviceRole.roleArn,
+      roleArn: this.role.roleArn,
       storageConfiguration: {
         opensearchServerlessConfiguration: {
-          collectionArn: props.collection.attrArn,
-          vectorIndexName: props.vectorIndexName,
-          fieldMapping: props.fieldMapping,
+          collectionArn: props.vectorStore.collection.attrArn,
+          vectorIndexName: indexName,
+          fieldMapping: {
+            vectorField: knowledgeBaseName,
+            metadataField: "METADATA",
+            textField: "TEXT_CHUNK",
+          },
         },
         type: "OPENSEARCH_SERVERLESS",
       },
@@ -58,8 +81,9 @@ export class KnowledgeBase extends cdk.NestedStack {
       },
     });
 
-    // TODO add data sources for evaluation
+    this.knowledgeBase.node.addDependency(index);
 
+    // // TODO add data sources for evaluation
     this.dataSource = new bedrock.CfnDataSource(this, "data-source", {
       name: "demo-example",
       knowledgeBaseId: this.knowledgeBase.ref,
@@ -72,14 +96,6 @@ export class KnowledgeBase extends cdk.NestedStack {
         },
       },
     });
-
-    this.role.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["bedrock:InvokeModel"],
-        resources: [props.embeddingModel.modelArn],
-      })
-    );
 
     // TODO parsing strategy
   }

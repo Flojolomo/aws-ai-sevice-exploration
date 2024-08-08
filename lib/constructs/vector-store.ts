@@ -11,28 +11,23 @@ import { CfnResource } from "aws-cdk-lib";
 import { Port } from "aws-cdk-lib/aws-ec2";
 import { FoundationModel } from "aws-cdk-lib/aws-bedrock";
 import { OpenSearchDataAccessPolicy } from "./open-search-data-access-policy";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 
 interface VectorStoreProps {
   name: string;
   indexName: string;
   deleteOldIndices?: boolean;
   enableStandbyReplicas?: boolean;
-  // readRoles?: iam.IRole[];
-  // writeRoles?: iam.IRole[];
-  readWriteRoles?: iam.IRole[];
 }
 
-type DataAccessPolicyStatement = {
-  Rules: {
-    Resource: string[];
-    Permission: string[];
-    ResourceType: string;
-  }[];
-  Principal: string[];
-  Description?: string;
-};
+interface IndexConfiguration {
+  dimension: number;
+  metadataField: string;
+  textField: string;
+  vectorField: string;
+}
 
-export class VectorStore extends cdk.NestedStack {
+export class VectorStore extends Construct {
   public readonly collection: osServerless.CfnCollection;
   public readonly vectorIndexName: string;
 
@@ -43,6 +38,8 @@ export class VectorStore extends cdk.NestedStack {
   };
 
   private readonly dataAccessPolicy: OpenSearchDataAccessPolicy;
+  private readonly createIndexFunction: NodejsFunction;
+  private readonly customResourceProvider: cr.Provider;
 
   public constructor(scope: Construct, id: string, props: VectorStoreProps) {
     super(scope, id);
@@ -50,14 +47,6 @@ export class VectorStore extends cdk.NestedStack {
     this.vectorIndexName = props.indexName;
 
     this.collection = this.createCollection({ name: props.name });
-    /**
-     * For now, public access is granted, if this would not be the case,
-     * the custom resource would need to run in a VPC with VPC endpoint.
-     * This would increase cost and complexity.
-     *
-     * Hence, for evaluation purposes, this is fine.
-     */
-    this.createNetworkPolicy(this.collection.name);
 
     this.dataAccessPolicy = new OpenSearchDataAccessPolicy(
       this,
@@ -67,50 +56,75 @@ export class VectorStore extends cdk.NestedStack {
       }
     );
 
-    // const { customResource, executionRole } = this.createIndex({
-    //   collection: this.collection,
-    //   deleteOldIndices: props.deleteOldIndices,
-    //   indexName: props.indexName,
-    // });
+    [
+      /**
+       * For now, public access is granted, if this would not be the case,
+       * the custom resource would need to run in a VPC with VPC endpoint.
+       * This would increase cost and complexity.
+       *
+       * Hence, for evaluation purposes, this is fine.
+       */
+      this.createNetworkPolicy(this.collection.name),
+      this.createEncryptionPolicy(this.collection.name),
+      this.dataAccessPolicy,
+    ].forEach((policy) => this.collection.addDependency(policy));
 
-    // this.dataAccessPolicy = this.createDataAccessPolicy(
-    //   props.name,
-    //   executionRole!
-    // );
+    const { function: createIndexFunction } = new LambdaFunction(
+      this,
+      "create-index",
+      {
+        functionProps: {
+          entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
+          environment: {
+            OPENSEARCH_DOMAIN: this.collection.attrCollectionEndpoint,
+          },
+        },
+      }
+    );
 
-    // customResource.node.addDependency(this.dataAccessPolicy);
+    this.createIndexFunction = createIndexFunction;
+    this.grantReadWrite(createIndexFunction.role!);
 
-    // const policies = [
-    //   this.dataAccessPolicy,
-    //   this.createNetworkPolicy(props.name),
-    //   this.createEncryptionPolicy(props.name),
-    // ];
-    // for (const policy of policies) {
-    //   this.collection.addDependency(policy);
-    // }
+    this.customResourceProvider = new cr.Provider(
+      this,
+      "create-index-provider",
+      {
+        onEventHandler: this.createIndexFunction,
+        logRetention: logs.RetentionDays.ONE_DAY,
+      }
+    );
 
-    // // props.readRoles?.forEach((role) => this.grantRead(role));
-    // // props.writeRoles?.forEach((role) => this.grantWrite(role));
-    // props.readWriteRoles?.forEach((role) => this.grantReadWrite(role));
-
-    // this.node.addDependency(customResource);
+    this.createIndexFunction.role?.addManagedPolicy(
+      new iam.ManagedPolicy(this, "aoss-policy", {
+        statements: [
+          new iam.PolicyStatement({
+            sid: "AllowCreateIndex",
+            effect: iam.Effect.ALLOW,
+            actions: [
+              // "aoss:DescribeCollection",
+              // "aoss:DescribeIndex",
+              // "aoss:CreateIndex",
+              // TODO scope down permissions - might move to data access policy
+              "aoss:APIAccessAll",
+            ],
+            // When passing in the collection, there is a circular dependency
+            resources: ["*"],
+          }),
+        ],
+      })
+    );
   }
-
-  // private addDependencyOnAllChildren() {
-  //   const children = this.node.findAll();
-
-  //   children.forEach(child => {
-  //     if (child instanceof CfnResource) {
-  //       this.node.addDependency(child);
-  //     }
-  //   });
-  // }
 
   public grantRead(grantee: iam.IGrantable): iam.Grant {
     return this.dataAccessPolicy.grantRead(grantee);
   }
 
   public grantReadWrite(grantee: iam.IGrantable): void {
+    iam.Grant.addToPrincipal({
+      grantee,
+      actions: ["aoss:APIAccessAll"],
+      resourceArns: ["*"],
+    });
     this.dataAccessPolicy.grantReadWrite(grantee);
   }
 
@@ -175,74 +189,24 @@ export class VectorStore extends cdk.NestedStack {
     });
   }
 
-  private createIndex({
-    collection,
-    indexName,
-    deleteOldIndices = false,
-  }: {
-    collection: osServerless.CfnCollection;
-    indexName: string;
-    deleteOldIndices?: boolean;
-  }) {
-    const { function: createIndexFunction } = new LambdaFunction(
-      this,
-      "create-index",
-      {
-        functionProps: {
-          entry: path.join(__dirname, "..", "lambda/create-index/handler.ts"),
-          environment: {
-            OPENSEARCH_DOMAIN: collection.attrCollectionEndpoint,
-          },
-        },
-      }
-    );
-
-    const customResourceProvider = new cr.Provider(
-      this,
-      "create-index-provider",
-      {
-        onEventHandler: createIndexFunction,
-        logRetention: logs.RetentionDays.ONE_DAY,
-      }
-    );
-
+  public createIndex(indexName: string, config: IndexConfiguration) {
     const customResource = new cdk.CustomResource(
       this,
-      "create-index-custom-resource",
+      `create-index-${cdk.Names.uniqueId(this)}`,
       {
-        serviceToken: customResourceProvider.serviceToken,
+        serviceToken: this.customResourceProvider.serviceToken,
         properties: {
-          DELETE_OLD_INDICES: deleteOldIndices,
           INDEX_NAME: indexName,
           INDEX_CONFIGURATION: {
-            DIMENSION: 1024, // TODO depending of model
-            MAPPING_FIELD_METADATA: this.fieldMapping.metadataField,
-            MAPPING_FIELD_TEXT_CHUNK: this.fieldMapping.textField,
-            VECTOR_FIELD: this.fieldMapping.vectorField,
+            DIMENSION: config.dimension,
+            MAPPING_FIELD_METADATA: config.metadataField,
+            MAPPING_FIELD_TEXT_CHUNK: config.textField,
+            VECTOR_FIELD: config.vectorField,
           },
         },
       }
     );
 
-    createIndexFunction.role?.addManagedPolicy(
-      new iam.ManagedPolicy(this, "aoss-policy", {
-        statements: [
-          new iam.PolicyStatement({
-            sid: "AllowCreateIndex",
-            effect: iam.Effect.ALLOW,
-            actions: [
-              "aoss:DescribeCollection",
-              "aoss:DescribeIndex",
-              "aoss:CreateIndex",
-              // TODO scope down permissions - might move to data access policy
-              "aoss:*",
-            ],
-            resources: ["*"],
-          }),
-        ],
-      })
-    );
-
-    return { customResource, executionRole: createIndexFunction.role };
+    return customResource;
   }
 }

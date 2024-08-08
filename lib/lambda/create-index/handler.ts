@@ -59,31 +59,36 @@ export const handler = async (
   console.log("#####", event);
 
   const indexName = event.ResourceProperties.INDEX_NAME;
-  const deleteOldIndices = event.ResourceProperties.DELETE_OLD_INDICES;
   const indexConfiguration = event.ResourceProperties.INDEX_CONFIGURATION;
 
   if (!indexName) {
     throw new Error("Missing INDEX_NAME in ResourceProperties");
   }
 
-  if (deleteOldIndices === undefined) {
-    throw new Error("Missing DELETE_OLD_INDICES in ResourceProperties");
-  }
-
   if (!indexConfiguration) {
     throw new Error("Missing INDEX_CONFIGURATION in ResourceProperties");
   }
 
-  await verifyIndexExists(indexName, indexConfiguration);
-  if (deleteOldIndices) {
-    await deleteStaleIndices(indexName);
+  if (event.RequestType === "Delete") {
+    console.log("Deleting index ", indexName);
+    return {
+      Status: "SUCCESS",
+      RequestId: event.RequestId,
+      LogicalResourceId: event.LogicalResourceId,
+      StackId: event.StackId,
+      //  Could be index name TODO need to verify with multiple KBs
+      PhysicalResourceId: "MyResourceId", // TODO
+    };
   }
+
+  await verifyIndexExists(indexName, indexConfiguration);
 
   return {
     Status: "SUCCESS",
     RequestId: event.RequestId,
     LogicalResourceId: event.LogicalResourceId,
     StackId: event.StackId,
+    //  Could be index name TODO need to verify with multiple KBs
     PhysicalResourceId: "MyResourceId", // TODO
   };
 };

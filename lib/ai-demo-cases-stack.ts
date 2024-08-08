@@ -12,10 +12,6 @@ export class AiDemoCasesStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const serviceRole = new iam.Role(this, "knowledge-base-role", {
-      assumedBy: new iam.ServicePrincipal("bedrock.amazonaws.com"),
-    });
-
     const embeddingModel = FoundationModel.fromFoundationModelId(
       this,
       "embedding-model",
@@ -28,28 +24,29 @@ export class AiDemoCasesStack extends cdk.Stack {
       deleteOldIndices: false,
       indexName: "ninth-index",
       name: "demo-example",
-      readWriteRoles: [serviceRole],
     });
 
-    const knowledgeBase = new KnowledgeBase(this, "knowledge-base", {
-      ...vectorStore,
+    vectorStore.grantRead(new iam.AccountPrincipal(cdk.Stack.of(this).account));
+
+    new KnowledgeBase(this, "knowledge-base", {
       embeddingModel,
-      serviceRole: serviceRole,
+      vectorDimension: 1024,
+      vectorStore,
     });
 
     // knowledgeBase.addDependency(vectorStore);
 
-    new SelfDestruct(this, "SelfDestruct", {
-      defaultBehavior: {
-        destoryAllResources: true,
-        purgeResourceDependencies: true,
-      },
-      trigger: {
-        scheduled: {
-          afterDuration: cdk.Duration.hours(4),
-          enabled: true,
-        },
-      },
-    });
+    // new SelfDestruct(this, "SelfDestruct", {
+    //   defaultBehavior: {
+    //     destoryAllResources: true,
+    //     purgeResourceDependencies: true,
+    //   },
+    //   trigger: {
+    //     scheduled: {
+    //       afterDuration: cdk.Duration.hours(4),
+    //       enabled: true,
+    //     },
+    //   },
+    // });
   }
 }
