@@ -20,6 +20,11 @@ export class AiDemoCasesStack extends cdk.Stack {
       }
     );
 
+    const s3Bucket = new cdk.aws_s3.Bucket(this, "s3-bucket", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
     const vectorStore = new VectorStore(this, "vector-store", {
       deleteOldIndices: false,
       indexName: "ninth-index",
@@ -32,6 +37,7 @@ export class AiDemoCasesStack extends cdk.Stack {
       embeddingModel,
       vectorDimension: 1024,
       vectorStore,
+      sourceBucket: s3Bucket,
     });
 
     knowledge.addDataSource("nr-four", {
@@ -55,6 +61,7 @@ export class AiDemoCasesStack extends cdk.Stack {
       embeddingModel: titanEmbedding,
       vectorDimension: 1536,
       vectorStore,
+      sourceBucket: s3Bucket,
     });
 
     new SelfDestruct(this, "SelfDestruct", {
