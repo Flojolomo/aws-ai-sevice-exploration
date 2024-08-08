@@ -10,6 +10,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import { CfnResource } from "aws-cdk-lib";
 import { Port } from "aws-cdk-lib/aws-ec2";
 import { FoundationModel } from "aws-cdk-lib/aws-bedrock";
+import { OpenSearchDataAccessPolicy } from "./open-search-data-access-policy";
 
 interface VectorStoreProps {
   name: string;
@@ -41,9 +42,7 @@ export class VectorStore extends cdk.NestedStack {
     textField: "AMAZON_BEDROCK_TEXT_CHUNK",
   };
 
-  private readonly dataAccessPolicy: osServerless.CfnAccessPolicy;
-  private readonly dataAccessPolicyDocument: Array<DataAccessPolicyStatement> =
-    [];
+  private readonly dataAccessPolicy: OpenSearchDataAccessPolicy;
 
   public constructor(scope: Construct, id: string, props: VectorStoreProps) {
     super(scope, id);
@@ -51,31 +50,48 @@ export class VectorStore extends cdk.NestedStack {
     this.vectorIndexName = props.indexName;
 
     this.collection = this.createCollection({ name: props.name });
-    const { customResource, executionRole } = this.createIndex({
-      collection: this.collection,
-      deleteOldIndices: props.deleteOldIndices,
-      indexName: props.indexName,
-    });
+    /**
+     * For now, public access is granted, if this would not be the case,
+     * the custom resource would need to run in a VPC with VPC endpoint.
+     * This would increase cost and complexity.
+     *
+     * Hence, for evaluation purposes, this is fine.
+     */
+    this.createNetworkPolicy(this.collection.name);
 
-    this.dataAccessPolicy = this.createDataAccessPolicy(
-      props.name,
-      executionRole!
+    this.dataAccessPolicy = new OpenSearchDataAccessPolicy(
+      this,
+      "data-access-policy",
+      {
+        collection: this.collection,
+      }
     );
 
-    customResource.node.addDependency(this.dataAccessPolicy);
+    // const { customResource, executionRole } = this.createIndex({
+    //   collection: this.collection,
+    //   deleteOldIndices: props.deleteOldIndices,
+    //   indexName: props.indexName,
+    // });
 
-    const policies = [
-      this.dataAccessPolicy,
-      this.createNetworkPolicy(props.name),
-      this.createEncryptionPolicy(props.name),
-    ];
-    for (const policy of policies) {
-      this.collection.addDependency(policy);
-    }
+    // this.dataAccessPolicy = this.createDataAccessPolicy(
+    //   props.name,
+    //   executionRole!
+    // );
 
-    // props.readRoles?.forEach((role) => this.grantRead(role));
-    // props.writeRoles?.forEach((role) => this.grantWrite(role));
-    props.readWriteRoles?.forEach((role) => this.grantReadWrite(role));
+    // customResource.node.addDependency(this.dataAccessPolicy);
+
+    // const policies = [
+    //   this.dataAccessPolicy,
+    //   this.createNetworkPolicy(props.name),
+    //   this.createEncryptionPolicy(props.name),
+    // ];
+    // for (const policy of policies) {
+    //   this.collection.addDependency(policy);
+    // }
+
+    // // props.readRoles?.forEach((role) => this.grantRead(role));
+    // // props.writeRoles?.forEach((role) => this.grantWrite(role));
+    // props.readWriteRoles?.forEach((role) => this.grantReadWrite(role));
 
     // this.node.addDependency(customResource);
   }
@@ -90,78 +106,12 @@ export class VectorStore extends cdk.NestedStack {
   //   });
   // }
 
-  public grantRead(role: iam.IRole): void {
-    this.dataAccessPolicyDocument.push({
-      Rules: [
-        {
-          Resource: [`collection/${this.collection.name}`],
-          Permission: ["aoss:DescribeCollectionItems"],
-          ResourceType: "collection",
-        },
-        {
-          Resource: [`index/${this.collection.name}/*`],
-          Permission: ["aoss:DescribeIndex", "aoss:ReadDocument"],
-          ResourceType: "index",
-        },
-      ],
-      Principal: [role.roleArn],
-    });
-
-    this.dataAccessPolicy.policy = JSON.stringify(
-      this.dataAccessPolicyDocument
-    );
+  public grantRead(grantee: iam.IGrantable): iam.Grant {
+    return this.dataAccessPolicy.grantRead(grantee);
   }
 
-  public grantWrite(role: iam.IRole): void {
-    // TODO
-  }
-
-  public grantReadWrite(role: iam.IRole): void {
-    this.dataAccessPolicyDocument.push({
-      Rules: [
-        {
-          Resource: [`collection/${this.collection.name}`],
-          Permission: [
-            "aoss:DescribeCollectionItems",
-            "aoss:CreateCollectionItems",
-            "aoss:UpdateCollectionItems",
-          ],
-          ResourceType: "collection",
-        },
-        {
-          Resource: [`index/${this.collection.name}/*`],
-          Permission: [
-            "aoss:UpdateIndex",
-            "aoss:DescribeIndex",
-            "aoss:CreateIndex",
-            "aoss:ReadDocument",
-            "aoss:WriteDocument",
-          ],
-          ResourceType: "index",
-        },
-      ],
-      Principal: [role.roleArn],
-      Description: "",
-    });
-
-    this.dataAccessPolicy.policy = JSON.stringify(
-      this.dataAccessPolicyDocument
-    );
-
-    role.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        sid: "AllowCreateIndex",
-        effect: iam.Effect.ALLOW,
-        actions: [
-          // "aoss:DescribeCollection",
-          // "aoss:DescribeIndex",
-          // "aoss:CreateIndex",
-          // TODO scope down permissions - might move to data access policy
-          "aoss:*",
-        ],
-        resources: ["*"],
-      })
-    );
+  public grantReadWrite(grantee: iam.IGrantable): void {
+    this.dataAccessPolicy.grantReadWrite(grantee);
   }
 
   private createCollection({
@@ -184,33 +134,6 @@ export class VectorStore extends cdk.NestedStack {
     collection.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
 
     return collection;
-  }
-
-  private createDataAccessPolicy(
-    name: string,
-    roleForCreatingIndices: iam.IRole
-  ) {
-    this.dataAccessPolicyDocument.push({
-      Rules: [
-        {
-          Resource: [`index/${name}/*`],
-          Permission: [
-            "aoss:UpdateIndex",
-            "aoss:DescribeIndex",
-            "aoss:DeleteIndex",
-            "aoss:CreateIndex",
-          ],
-          ResourceType: "index",
-        },
-      ],
-      Principal: [roleForCreatingIndices.roleArn],
-    });
-
-    return new osServerless.CfnAccessPolicy(this, "data-access-policy", {
-      name,
-      type: "data",
-      policy: JSON.stringify(this.dataAccessPolicyDocument),
-    });
   }
 
   private createEncryptionPolicy(name: string) {

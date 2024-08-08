@@ -66,7 +66,7 @@ export const handler = async (
     throw new Error("Missing INDEX_NAME in ResourceProperties");
   }
 
-  if (!deleteOldIndices) {
+  if (deleteOldIndices === undefined) {
     throw new Error("Missing DELETE_OLD_INDICES in ResourceProperties");
   }
 
