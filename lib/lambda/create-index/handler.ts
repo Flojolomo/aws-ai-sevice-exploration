@@ -58,21 +58,9 @@ export const handler = async (
 ): Promise<CloudFormationCustomResourceResponse> => {
   console.log("#####", event);
 
-  const embeddingModelId = event.ResourceProperties.EMBEDDING_MODEL_ID;
   const indexName = event.ResourceProperties.INDEX_NAME;
   const deleteOldIndices = event.ResourceProperties.DELETE_OLD_INDICES;
   const indexConfiguration = event.ResourceProperties.INDEX_CONFIGURATION;
-
-  if (!embeddingModelId) {
-    throw new Error("Missing EMBEDDING_MODEL_ID in ResourceProperties");
-  }
-
-  const modelProperties = bedrockEmbeddingModels[embeddingModelId];
-  if (!modelProperties) {
-    throw new Error(
-      `Unknown model ID: ${embeddingModelId}. Failed to identify model properties.`
-    );
-  }
 
   if (!indexName) {
     throw new Error("Missing INDEX_NAME in ResourceProperties");

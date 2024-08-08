@@ -7,8 +7,8 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import { KnowledgeBaseDataSource } from "./knowledge-base-data-source";
 
 interface KnowledgeBaseProps {
+  embeddingModel: bedrock.FoundationModel;
   collection: osServerless.CfnCollection;
-  embeddingModelId: string;
   vectorIndexName: string;
   serviceRole: iam.Role;
   sourceBucket?: s3.Bucket;
@@ -28,8 +28,19 @@ export class KnowledgeBase extends cdk.NestedStack {
     super(scope, id);
 
     this.role = props.serviceRole;
+
+    const sourceBucket =
+      props.sourceBucket ?? new s3.Bucket(this, "source-bucket");
+
+    const grantable = sourceBucket.grantRead(this.role);
+    grantable.assertSuccess();
+
+    const knowledgeBaseName = `${cdk.Names.uniqueResourceName(this, {
+      maxLength: 64,
+    })}-${props.vectorIndexName}`;
+
     this.knowledgeBase = new bedrock.CfnKnowledgeBase(this, "knowledge-base", {
-      name: cdk.Names.uniqueResourceName(this, {}),
+      name: knowledgeBaseName,
       roleArn: props.serviceRole.roleArn,
       storageConfiguration: {
         opensearchServerlessConfiguration: {
@@ -42,15 +53,10 @@ export class KnowledgeBase extends cdk.NestedStack {
       knowledgeBaseConfiguration: {
         type: "VECTOR",
         vectorKnowledgeBaseConfiguration: {
-          embeddingModelArn: `arn:aws:bedrock:eu-central-1::foundation-model/${props.embeddingModelId}`,
+          embeddingModelArn: props.embeddingModel.modelArn,
         },
       },
     });
-
-    const sourceBucket =
-      props.sourceBucket ?? new s3.Bucket(this, "source-bucket");
-
-    sourceBucket.grantRead(this.role);
 
     // TODO add data sources for evaluation
 
@@ -66,6 +72,14 @@ export class KnowledgeBase extends cdk.NestedStack {
         },
       },
     });
+
+    this.role.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:InvokeModel"],
+        resources: [props.embeddingModel.modelArn],
+      })
+    );
 
     // TODO parsing strategy
   }

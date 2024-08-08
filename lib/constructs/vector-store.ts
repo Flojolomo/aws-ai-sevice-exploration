@@ -8,15 +8,16 @@ import * as path from "path";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { CfnResource } from "aws-cdk-lib";
+import { Port } from "aws-cdk-lib/aws-ec2";
+import { FoundationModel } from "aws-cdk-lib/aws-bedrock";
 
 interface VectorStoreProps {
-  embeddingModelId: string;
   name: string;
   indexName: string;
   deleteOldIndices?: boolean;
   enableStandbyReplicas?: boolean;
-  readRoles?: iam.IRole[];
-  writeRoles?: iam.IRole[];
+  // readRoles?: iam.IRole[];
+  // writeRoles?: iam.IRole[];
   readWriteRoles?: iam.IRole[];
 }
 
@@ -32,7 +33,6 @@ type DataAccessPolicyStatement = {
 
 export class VectorStore extends cdk.NestedStack {
   public readonly collection: osServerless.CfnCollection;
-  public readonly embeddingModelId: string;
   public readonly vectorIndexName: string;
 
   public readonly fieldMapping = {
@@ -49,12 +49,10 @@ export class VectorStore extends cdk.NestedStack {
     super(scope, id);
 
     this.vectorIndexName = props.indexName;
-    this.embeddingModelId = props.embeddingModelId;
 
     this.collection = this.createCollection({ name: props.name });
     const { customResource, executionRole } = this.createIndex({
       collection: this.collection,
-      embeddingModelId: props.embeddingModelId,
       deleteOldIndices: props.deleteOldIndices,
       indexName: props.indexName,
     });
@@ -75,9 +73,9 @@ export class VectorStore extends cdk.NestedStack {
       this.collection.addDependency(policy);
     }
 
-    this.grantRead(new iam.AccountPrincipal(cdk.Stack.of(this).account).arn);
-    props.readRoles?.forEach((role) => this.grantRead(role.roleArn));
-    props.writeRoles?.forEach((role) => this.grantWrite(role.roleArn));
+    // props.readRoles?.forEach((role) => this.grantRead(role));
+    // props.writeRoles?.forEach((role) => this.grantWrite(role));
+    props.readWriteRoles?.forEach((role) => this.grantReadWrite(role));
 
     // this.node.addDependency(customResource);
   }
@@ -92,13 +90,7 @@ export class VectorStore extends cdk.NestedStack {
   //   });
   // }
 
-  public grantRead(grantee: iam.IGrantable): void {
-    iam.Grant.addToPrincipalOrResource({
-      grantee,
-      actions: ["aoss:ReadDocument"],
-      resourceArns: [`index/${this.collection.name}/*`],
-      resource: this.dataAccessPolicy,
-    });
+  public grantRead(role: iam.IRole): void {
     this.dataAccessPolicyDocument.push({
       Rules: [
         {
@@ -120,7 +112,7 @@ export class VectorStore extends cdk.NestedStack {
     );
   }
 
-  public grantWrite(roleArn: string): void {
+  public grantWrite(role: iam.IRole): void {
     // TODO
   }
 
@@ -161,9 +153,9 @@ export class VectorStore extends cdk.NestedStack {
         sid: "AllowCreateIndex",
         effect: iam.Effect.ALLOW,
         actions: [
-          "aoss:DescribeCollection",
-          "aoss:DescribeIndex",
-          "aoss:CreateIndex",
+          // "aoss:DescribeCollection",
+          // "aoss:DescribeIndex",
+          // "aoss:CreateIndex",
           // TODO scope down permissions - might move to data access policy
           "aoss:*",
         ],
@@ -262,12 +254,10 @@ export class VectorStore extends cdk.NestedStack {
 
   private createIndex({
     collection,
-    embeddingModelId,
     indexName,
     deleteOldIndices = false,
   }: {
     collection: osServerless.CfnCollection;
-    embeddingModelId: string;
     indexName: string;
     deleteOldIndices?: boolean;
   }) {
@@ -300,7 +290,6 @@ export class VectorStore extends cdk.NestedStack {
         serviceToken: customResourceProvider.serviceToken,
         properties: {
           DELETE_OLD_INDICES: deleteOldIndices,
-          EMBEDDING_MODEL_ID: embeddingModelId,
           INDEX_NAME: indexName,
           INDEX_CONFIGURATION: {
             DIMENSION: 1024, // TODO depending of model
