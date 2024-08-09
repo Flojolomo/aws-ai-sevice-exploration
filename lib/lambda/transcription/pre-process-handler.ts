@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-transcribe";
 
 import { S3Event } from "aws-lambda";
-import path = require("path");
+import * as path from "path";
 
 const transcribeClient = new Transcribe();
 const logger = new Logger();

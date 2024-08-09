@@ -1,5 +1,5 @@
-import { S3Event, S3EventRecord, SNSEvent, SNSEventRecord } from "aws-lambda";
-import path = require("path");
+import { S3Event, S3EventRecord } from "aws-lambda";
+import * as path from "path";
 import { getFileSize, readFileFromS3, writeFileToS3 } from "./s3Client";
 import { translateText } from "./translateClient";
 

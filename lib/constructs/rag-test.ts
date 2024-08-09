@@ -1,6 +1,6 @@
 import { Construct } from "constructs";
 import { LambdaFunction } from "./lambda-function";
-import path = require("path");
+import * as path from "path";
 import * as bedrock from "aws-cdk-lib/aws-bedrock";
 import * as cdk from "aws-cdk-lib";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";

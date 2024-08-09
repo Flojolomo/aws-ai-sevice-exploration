@@ -3,7 +3,7 @@ import {
   Translate,
   TranslateTextCommandInput,
 } from "@aws-sdk/client-translate";
-import path = require("path");
+import * as path from "path";
 
 const translateClient = new Translate();
 

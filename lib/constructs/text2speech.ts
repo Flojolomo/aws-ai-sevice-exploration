@@ -5,7 +5,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 
 import { Construct } from "constructs";
 import { LambdaFunction } from "./lambda-function";
-import path = require("path");
+import * as path from "path";
 
 interface Text2SpeechProps {
   bucket: s3.Bucket;

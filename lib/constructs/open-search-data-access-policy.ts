@@ -233,8 +233,10 @@ export class OpenSearchDataAccessPolicy
       return this.getArnFromPrincipal(principal.grantPrincipal);
     }
 
+    type NewType = any;
+
     // For custom principal implementations
-    if (typeof (principal as any).arn === "string") {
+    if (typeof (principal as NewType).arn === "string") {
       return (principal as any).arn;
     }
 

@@ -2,7 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import { LambdaFunction } from "./lambda-function";
-import path = require("path");
+import * as path from "path";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { IFunction } from "aws-cdk-lib/aws-lambda";
 

@@ -1,0 +1,14 @@
+{
+  "eslint.validate": [
+    "typescript",
+    { "language": "typescript", "autoFix": true }
+  ],
+  "eslint.useFlatConfig": true,
+  "eslint.options": {
+    "extensions": [".ts"]
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": ["typescript"]
+}

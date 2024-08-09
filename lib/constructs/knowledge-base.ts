@@ -10,7 +10,7 @@ import {
 import { VectorStore } from "./vector-store";
 import { CronOptions } from "aws-cdk-lib/aws-events";
 import { LambdaFunction } from "./lambda-function";
-import path = require("path");
+import * as path from "path";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";

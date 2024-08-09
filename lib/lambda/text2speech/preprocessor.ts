@@ -4,7 +4,7 @@ import {
 } from "@aws-sdk/client-polly";
 import { S3 } from "@aws-sdk/client-s3";
 import { S3Event, S3EventRecord } from "aws-lambda";
-import path = require("path");
+import * as path from "path";
 
 const s3Client = new S3();
 const pollyClient = new Polly();
