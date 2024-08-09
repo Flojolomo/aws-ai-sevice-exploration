@@ -89,6 +89,7 @@ export class OpenSearchDataAccessPolicy
       "aoss:CreateIndex",
       "aoss:ReadDocument",
       "aoss:WriteDocument",
+      "aoss:DeleteIndex",
     ];
 
     if (resourceType === "collection") {
@@ -197,26 +198,6 @@ export class OpenSearchDataAccessPolicy
     );
 
     return iam.Grant.drop(grantee, "");
-
-    // .addToPrincipalOrResource({
-    //   grantee,
-    //   actions: ["aoss:DescribeCollectionItems"],
-    //   resourceArns: [`collection/${this.collection.name}`],
-    //   resource: this,
-    // }).combine(
-    //   iam.Grant.addToPrincipalOrResource({
-    //     grantee,
-    //     actions: [
-    //       "aoss:UpdateIndex",
-    //       "aoss:DescribeIndex",
-    //       "aoss:CreateIndex",
-    //       "aoss:ReadDocument",
-    //       "aoss:WriteDocument",
-    //     ],
-    //     resourceArns: [`index/${this.collection.name}/*`],
-    //     resource: this,
-    //   })
-    // );
   }
 
   private getArnFromPrincipal(principal: iam.IPrincipal): string {

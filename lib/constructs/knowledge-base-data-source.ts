@@ -24,7 +24,7 @@ export type ChunkingConfiguration =
 export interface KnowledgeBaseDataSourceProps {
   name: string;
   bucket: s3.IBucket;
-  dataDeletionPolicy?: "DELETE" | "RETAIN";
+  dataDeletionPolicy?: "DELETE"; // | "RETAIN"; Fails when destroying the stack
   chunkingConfiguration?: ChunkingConfiguration;
   description?: string;
   inclusionPrefixes?: string[];
@@ -41,7 +41,7 @@ export class KnowledgeBaseDataSource extends bedrock.CfnDataSource {
       description: props.description,
       name: props.name,
       knowledgeBaseId: props.knowledgeBase.ref,
-      dataDeletionPolicy: props.dataDeletionPolicy ?? "DELETE",
+      dataDeletionPolicy: props.dataDeletionPolicy ?? "RETAIN",
       dataSourceConfiguration: {
         type: "S3",
         s3Configuration: {

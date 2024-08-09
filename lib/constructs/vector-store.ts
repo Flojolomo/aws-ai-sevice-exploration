@@ -12,7 +12,6 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 
 interface VectorStoreProps {
   name: string;
-  indexName: string;
   deleteOldIndices?: boolean;
   enableStandbyReplicas?: boolean;
 }
@@ -40,8 +39,6 @@ export class VectorStore extends Construct {
 
   public constructor(scope: Construct, id: string, props: VectorStoreProps) {
     super(scope, id);
-
-    this.vectorIndexName = props.indexName;
 
     this.collection = this.createCollection({ name: props.name });
 

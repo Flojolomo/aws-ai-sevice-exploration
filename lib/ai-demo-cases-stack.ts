@@ -27,7 +27,6 @@ export class AiDemoCasesStack extends cdk.Stack {
 
     const vectorStore = new VectorStore(this, "vector-store", {
       deleteOldIndices: false,
-      indexName: "ninth-index",
       name: "demo-example",
     });
 
@@ -38,9 +37,12 @@ export class AiDemoCasesStack extends cdk.Stack {
       vectorDimension: 1024,
       vectorStore,
       sourceBucket: s3Bucket,
+      syncAfterCreation: true,
     });
 
     knowledge.addDataSource("nr-four", {
+      syncSchedule: { hour: "/2" },
+      syncAfterCreation: true,
       chunkingConfiguration: {
         chunkingStrategy: "FIXED_SIZE",
         fixedSizeChunkingConfiguration: {

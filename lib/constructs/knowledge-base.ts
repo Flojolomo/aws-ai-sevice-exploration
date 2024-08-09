@@ -1,7 +1,6 @@
 import { Construct } from "constructs";
 import * as bedrock from "aws-cdk-lib/aws-bedrock";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as osServerless from "aws-cdk-lib/aws-opensearchserverless";
 import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import {
@@ -10,6 +9,13 @@ import {
 } from "./knowledge-base-data-source";
 import { VectorStore } from "./vector-store";
 import { CronOptions } from "aws-cdk-lib/aws-events";
+import { LambdaFunction } from "./lambda-function";
+import path = require("path");
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import * as events from "aws-cdk-lib/aws-events";
+import * as targets from "aws-cdk-lib/aws-events-targets";
+import * as cr from "aws-cdk-lib/custom-resources";
+import * as logs from "aws-cdk-lib/aws-logs";
 
 interface KnowledgeBaseProps {
   dataSourceId?: string;
@@ -18,13 +24,17 @@ interface KnowledgeBaseProps {
   vectorStore: VectorStore;
   sourceBucket?: s3.Bucket;
   syncSchedule?: CronOptions;
-  syncOnCreate?: boolean;
+  syncAfterCreation?: boolean;
 }
 
 export class KnowledgeBase extends Construct {
   public readonly role: iam.Role;
   public readonly knowledgeBase: bedrock.CfnKnowledgeBase;
   public readonly dataSource: bedrock.CfnDataSource;
+
+  private startIngestionJobFunction?: NodejsFunction;
+  private injectDataAfterCreationFunction?: NodejsFunction;
+  private customResourceProvider?: cr.Provider;
 
   public constructor(scope: Construct, id: string, props: KnowledgeBaseProps) {
     super(scope, id);
@@ -87,19 +97,32 @@ export class KnowledgeBase extends Construct {
 
     this.knowledgeBase.node.addDependency(index);
 
-    new KnowledgeBaseDataSource(this, "data-source", {
+    const dataSourceName = props.dataSourceId ?? "default";
+    const dataSource = new KnowledgeBaseDataSource(this, "data-source", {
       bucket: sourceBucket,
       knowledgeBase: this.knowledgeBase,
-      name: props.dataSourceId ?? "default",
+      name: dataSourceName,
     });
-  }
 
-  public syncDataSourceAfterCreation() {
-    // TODO start sync
-  }
+    if (!(props.syncSchedule || props.syncAfterCreation)) {
+      return;
+    }
 
-  public syncDataSourceOnSchedule() {
-    // TODO start sync
+    this.createFunctionToStartIngestionJob();
+
+    if (props.syncSchedule) {
+      this.syncDataSourceOnSchedule(
+        dataSource.attrDataSourceId,
+        props.syncSchedule
+      );
+    }
+
+    if (props.syncAfterCreation) {
+      this.syncDataSourceAfterCreation(
+        dataSourceName,
+        dataSource.attrDataSourceId
+      );
+    }
   }
 
   public addDataSource(
@@ -108,10 +131,14 @@ export class KnowledgeBase extends Construct {
       chunkingConfiguration,
       description,
       inclusionPrefixes,
+      syncSchedule,
+      syncAfterCreation,
     }: {
       description?: string;
       chunkingConfiguration?: ChunkingConfiguration;
       inclusionPrefixes?: string[];
+      syncSchedule?: CronOptions;
+      syncAfterCreation?: boolean;
     } = {}
   ) {
     // https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_bedrock.CfnDataSource.html
@@ -122,7 +149,7 @@ export class KnowledgeBase extends Construct {
     });
 
     sourceBucket.grantRead(this.role);
-    new KnowledgeBaseDataSource(this, `data-source-${id}`, {
+    const dataSource = new KnowledgeBaseDataSource(this, `data-source-${id}`, {
       bucket: sourceBucket,
       chunkingConfiguration,
       description,
@@ -130,5 +157,129 @@ export class KnowledgeBase extends Construct {
       knowledgeBase: this.knowledgeBase,
       name: id,
     });
+
+    if (syncSchedule) {
+      this.syncDataSourceOnSchedule(dataSource.attrDataSourceId, syncSchedule);
+    }
+
+    if (syncAfterCreation) {
+      this.syncDataSourceAfterCreation(id, dataSource.attrDataSourceId);
+    }
+  }
+
+  private createFunctionToStartIngestionJob() {
+    if (this.startIngestionJobFunction) {
+      return this.startIngestionJobFunction;
+    }
+
+    const { function: startIngestionJobFunction } = new LambdaFunction(
+      this,
+      "start-ingestion-job-data-source",
+      {
+        functionProps: {
+          entry: path.join(
+            __dirname,
+            "..",
+            "lambda/start-ingestion-job/start-sync.ts"
+          ),
+        },
+      }
+    );
+
+    startIngestionJobFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "StartIngestionJobOnSchedule",
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:StartIngestionJob"],
+        resources: [this.knowledgeBase.attrKnowledgeBaseArn],
+      })
+    );
+
+    this.startIngestionJobFunction = startIngestionJobFunction;
+    return startIngestionJobFunction;
+  }
+
+  private createFunctionIngestAfterCreation() {
+    if (this.injectDataAfterCreationFunction) {
+      return {
+        injectDataAfterCreationFunction: this.injectDataAfterCreationFunction,
+        customResourceProvider: this.customResourceProvider,
+      };
+    }
+
+    const { function: injectDataAfterCreationFunction } = new LambdaFunction(
+      this,
+      "start-ingestion-job-after-creation-data-source",
+      {
+        functionProps: {
+          entry: path.join(
+            __dirname,
+            "..",
+            "lambda/start-ingestion-job/custom-resource.ts"
+          ),
+        },
+      }
+    );
+
+    injectDataAfterCreationFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "StartIngestionJobAfterCreation",
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:StartIngestionJob"],
+        resources: [this.knowledgeBase.attrKnowledgeBaseArn],
+      })
+    );
+
+    const customResourceProvider = new cr.Provider(
+      this,
+      "sync-after-creation",
+      {
+        onEventHandler: injectDataAfterCreationFunction,
+        logRetention: logs.RetentionDays.ONE_DAY,
+      }
+    );
+
+    this.injectDataAfterCreationFunction = injectDataAfterCreationFunction;
+    this.customResourceProvider = customResourceProvider;
+
+    return {
+      injectDataAfterCreationFunction,
+      customResourceProvider,
+    };
+  }
+
+  private syncDataSourceAfterCreation(id: string, dataSourceId: string) {
+    const { customResourceProvider } = this.createFunctionIngestAfterCreation();
+
+    new cdk.CustomResource(this, `sync-after-creation-${id}`, {
+      serviceToken: customResourceProvider!.serviceToken,
+      properties: {
+        knowledgeBaseId: this.knowledgeBase.attrKnowledgeBaseId,
+        dataSourceId: dataSourceId,
+      },
+    });
+
+    // TODO start sync
+    // TODO therefore we need a custom resource - maybe this is more complex than expected?
+  }
+
+  private syncDataSourceOnSchedule(
+    dataSourceId: string,
+    syncSchedule: CronOptions
+  ) {
+    const createFunctionToStartIngestionJob =
+      this.createFunctionToStartIngestionJob();
+    const rule = new events.Rule(this, "cron-job", {
+      schedule: events.Schedule.cron(syncSchedule),
+    });
+
+    rule.addTarget(
+      new targets.LambdaFunction(createFunctionToStartIngestionJob, {
+        event: events.RuleTargetInput.fromObject({
+          knowledgeBaseId: this.knowledgeBase.attrKnowledgeBaseId,
+          dataSourceId: dataSourceId,
+        }),
+      })
+    );
   }
 }
